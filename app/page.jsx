@@ -12,6 +12,10 @@ export default function Home() {
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
 
+  const [wallet, setWallet] = useState(null);
+  const [walletLoading, setWalletLoading] = useState(false);
+  const [walletError, setWalletError] = useState("");
+
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
       setUser(data.session?.user ?? null);
@@ -24,6 +28,44 @@ export default function Home() {
 
     return () => listener.subscription.unsubscribe();
   }, []);
+
+  useEffect(() => {
+    if (!user) {
+      setWallet(null);
+      return;
+    }
+
+    let active = true;
+
+    async function loadWallet() {
+      setWalletLoading(true);
+      setWalletError("");
+
+      const { data, error } = await supabase
+        .from("wallets")
+        .select("balance, currency, network")
+        .eq("user_id", user.id)
+        .eq("currency", "USDT")
+        .eq("network", "BEP20")
+        .maybeSingle();
+
+      if (!active) return;
+
+      if (error) {
+        setWalletError(error.message);
+      } else {
+        setWallet(data);
+      }
+
+      setWalletLoading(false);
+    }
+
+    loadWallet();
+
+    return () => {
+      active = false;
+    };
+  }, [user]);
 
   async function handleAuth(e) {
     e.preventDefault();
@@ -43,7 +85,9 @@ export default function Home() {
         if (error) throw error;
 
         if (!data.session) {
-          setMessage("Registration successful! Check your email to confirm your account.");
+          setMessage(
+            "Registration successful! Check your email to confirm your account."
+          );
         } else {
           setMessage("Account created successfully!");
         }
@@ -65,7 +109,31 @@ export default function Home() {
   async function handleLogout() {
     await supabase.auth.signOut();
     setUser(null);
+    setWallet(null);
   }
+
+  const inputStyle = {
+    display: "block",
+    width: "100%",
+    boxSizing: "border-box",
+    padding: "14px",
+    margin: "15px 0",
+    borderRadius: "8px",
+    border: "1px solid #45566c",
+    background: "#07111f",
+    color: "white"
+  };
+
+  const buttonStyle = {
+    width: "100%",
+    padding: "14px",
+    background: "#e9b949",
+    color: "#07111f",
+    border: "none",
+    borderRadius: "8px",
+    fontWeight: "bold",
+    cursor: "pointer"
+  };
 
   return (
     <main style={{
@@ -83,10 +151,17 @@ export default function Home() {
         gap: "12px"
       }}>
         <div>
-          <h2 style={{ color: "#e9b949" }}>₿ CRYPTO MINING HUB</h2>
+          <h2 style={{ color: "#e9b949" }}>
+            ₿ CRYPTO MINING HUB
+          </h2>
           <small>Mine Smart. Grow Digital.</small>
         </div>
-        {user && <button onClick={handleLogout}>Logout</button>}
+
+        {user && (
+          <button onClick={handleLogout}>
+            Logout
+          </button>
+        )}
       </header>
 
       {!user ? (
@@ -139,7 +214,9 @@ export default function Home() {
           </form>
 
           {message && (
-            <p style={{ overflowWrap: "anywhere" }}>{message}</p>
+            <p style={{ overflowWrap: "anywhere" }}>
+              {message}
+            </p>
           )}
 
           <p style={{ marginTop: "22px" }}>
@@ -174,38 +251,41 @@ export default function Home() {
           <h1 style={{ color: "#e9b949" }}>
             Welcome to Crypto Mining Hub!
           </h1>
+
           <p>Logged in as: {user.email}</p>
+
           <h2>My Dashboard</h2>
-          <p>Wallet Balance: $0.00</p>
-          <p>Total Deposits: $0.00</p>
-          <p>Withdrawals: $0.00</p>
-          <p>Mining Status: Not connected</p>
+
+          <h3>My Wallet</h3>
+
+          {walletLoading ? (
+            <p>Loading wallet...</p>
+          ) : walletError ? (
+            <p>Wallet error: {walletError}</p>
+          ) : wallet ? (
+            <>
+              <h2>
+                {Number(wallet.balance).toFixed(2)} {wallet.currency}
+              </h2>
+              <p>Network: {wallet.network}</p>
+            </>
+          ) : (
+            <p>Wallet record not found.</p>
+          )}
+
+          <hr />
+
+          <h3>Total Deposits</h3>
+          <p>Not available yet</p>
+
+          <h3>Withdrawals</h3>
+          <p>Not available yet</p>
+
+          <h3>Mining Status</h3>
+          <p>Not connected</p>
           <p>Mining integration is coming soon.</p>
         </section>
       )}
     </main>
   );
 }
-
-const inputStyle = {
-  display: "block",
-  width: "100%",
-  boxSizing: "border-box",
-  padding: "14px",
-  margin: "15px 0",
-  borderRadius: "8px",
-  border: "1px solid #45566c",
-  background: "#07111f",
-  color: "white"
-};
-
-const buttonStyle = {
-  width: "100%",
-  padding: "14px",
-  background: "#e9b949",
-  color: "#07111f",
-  border: "none",
-  borderRadius: "8px",
-  fontWeight: "bold",
-  cursor: "pointer"
-};
