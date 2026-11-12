@@ -1,3 +1,4 @@
+
 {
   "name": "crypto-mining-hub",
   "version": "1.0.0",
@@ -10,6 +11,7 @@
   "dependencies": {
     "next": "15.5.29",
     "react": "19.1.0",
-    "react-dom": "19.1.0"
+    "react-dom": "19.1.0",
+    "@supabase/supabase-js": "^2.0.0"
   }
 }
