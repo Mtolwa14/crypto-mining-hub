@@ -1,0 +1,149 @@
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: #0b1220;
+  color: #ffffff;
+  font-family: Arial, sans-serif;
+}
+
+.container {
+  max-width: 1100px;
+  margin: auto;
+  padding: 24px;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.brand h2 {
+  color: #f5c451;
+  font-size: 17px;
+  margin: 0;
+}
+
+.brand small {
+  color: #94a3b8;
+}
+
+.logo {
+  background: #f5c451;
+  color: #0b1220;
+  padding: 12px;
+  border-radius: 12px;
+  font-size: 24px;
+}
+
+.demo {
+  border: 1px solid #f5c451;
+  color: #f5c451;
+  padding: 7px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+}
+
+.welcome {
+  background: linear-gradient(120deg, #172b49, #263b5d);
+  padding: 35px;
+  margin-top: 35px;
+  border-radius: 18px;
+}
+
+.welcome p {
+  color: #b7c5d9;
+}
+
+.welcome h1 {
+  color: #f5c451;
+  font-size: 34px;
+}
+
+button {
+  background: #f5c451;
+  color: #101827;
+  border: none;
+  border-radius: 9px;
+  padding: 13px 20px;
+  font-weight: bold;
+  cursor: pointer;
+}
+
+.section-title {
+  margin-top: 35px;
+}
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 15px;
+}
+
+.card, .actions, .mining {
+  background: #172337;
+  border: 1px solid #26364e;
+  padding: 20px;
+  border-radius: 14px;
+}
+
+.card p, .mining p {
+  color: #94a3b8;
+}
+
+.card h2 {
+  color: #f5c451;
+}
+
+.icon {
+  font-size: 25px;
+}
+
+.action-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+
+.action {
+  background: #26364e;
+  color: white;
+}
+
+.actions, .mining {
+  margin-top: 22px;
+}
+
+.mining span {
+  color: #f5c451;
+  font-size: 13px;
+}
+
+footer {
+  text-align: center;
+  color: #64748b;
+  margin-top: 40px;
+  padding: 20px;
+}
+
+@media (max-width: 500px) {
+  .container {
+    padding: 15px;
+  }
+
+  .welcome h1 {
+    font-size: 27px;
+  }
+}
