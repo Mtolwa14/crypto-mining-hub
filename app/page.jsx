@@ -16,6 +16,12 @@ export default function Home() {
   const [walletLoading, setWalletLoading] = useState(false);
   const [walletError, setWalletError] = useState("");
 
+  const [depositAmount, setDepositAmount] = useState("");
+  const [depositLoading, setDepositLoading] = useState(false);
+  const [depositError, setDepositError] = useState("");
+  const [depositInfo, setDepositInfo] = useState(null);
+  const [copyMessage, setCopyMessage] = useState("");
+
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
       setUser(data.session?.user ?? null);
@@ -110,6 +116,61 @@ export default function Home() {
     await supabase.auth.signOut();
     setUser(null);
     setWallet(null);
+    setDepositInfo(null);
+  }
+
+  async function handleDeposit(e) {
+    e.preventDefault();
+    setDepositLoading(true);
+    setDepositError("");
+    setDepositInfo(null);
+    setCopyMessage("");
+
+    try {
+      const { data, error } = await supabase.auth.getSession();
+
+      if (error) throw error;
+
+      const accessToken = data.session?.access_token;
+
+      if (!accessToken) {
+        throw new Error("Please log in again.");
+      }
+
+      const response = await fetch("/api/deposit", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`
+        },
+        body: JSON.stringify({
+          amount: Number(depositAmount)
+        })
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error || "Deposit request failed.");
+      }
+
+      setDepositInfo(result);
+    } catch (error) {
+      setDepositError(error.message);
+    } finally {
+      setDepositLoading(false);
+    }
+  }
+
+  async function copyAddress() {
+    if (!depositInfo?.pay_address) return;
+
+    try {
+      await navigator.clipboard.writeText(depositInfo.pay_address);
+      setCopyMessage("Address copied!");
+    } catch {
+      setCopyMessage("Please copy the address manually.");
+    }
   }
 
   const inputStyle = {
@@ -271,6 +332,94 @@ export default function Home() {
             </>
           ) : (
             <p>Wallet record not found.</p>
+          )}
+
+          <hr />
+
+          <h3>Deposit USDT</h3>
+          <p>Network: BNB Smart Chain (BEP20)</p>
+          <p>Minimum deposit: 1 USD</p>
+
+          <form onSubmit={handleDeposit}>
+            <input
+              type="number"
+              min="1"
+              max="10000"
+              step="0.01"
+              placeholder="Enter amount in USD"
+              value={depositAmount}
+              onChange={(e) => setDepositAmount(e.target.value)}
+              required
+              style={inputStyle}
+            />
+
+            <button
+              type="submit"
+              disabled={depositLoading}
+              style={buttonStyle}
+            >
+              {depositLoading
+                ? "Creating payment..."
+                : "Create Deposit"}
+            </button>
+          </form>
+
+          {depositError && (
+            <p style={{ color: "#ff8585", overflowWrap: "anywhere" }}>
+              {depositError}
+            </p>
+          )}
+
+          {depositInfo && (
+            <div style={{
+              marginTop: "22px",
+              padding: "18px",
+              background: "#07111f",
+              borderRadius: "10px",
+              overflowWrap: "anywhere"
+            }}>
+              <h3 style={{ color: "#e9b949" }}>
+                Payment Instructions
+              </h3>
+
+              <p>Payment status: {depositInfo.payment_status || "Waiting"}</p>
+
+              <p>Send exactly:</p>
+              <h2>
+                {depositInfo.pay_amount} {depositInfo.pay_currency}
+              </h2>
+
+              <p>Network: BEP20 only</p>
+
+              <p>Payment address:</p>
+              <p style={{
+                padding: "12px",
+                background: "#122238",
+                borderRadius: "8px",
+                overflowWrap: "anywhere"
+              }}>
+                {depositInfo.pay_address}
+              </p>
+
+              <button
+                type="button"
+                onClick={copyAddress}
+                style={buttonStyle}
+              >
+                Copy Payment Address
+              </button>
+
+              {copyMessage && <p>{copyMessage}</p>}
+
+              <p style={{ color: "#e9b949" }}>
+                Send only USDT on BEP20 to this address.
+                Your wallet balance will update after payment verification.
+              </p>
+
+              <small>
+                Payment ID: {depositInfo.payment_id}
+              </small>
+            </div>
           )}
 
           <hr />
