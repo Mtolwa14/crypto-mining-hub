@@ -135,8 +135,10 @@ if (!insertResponse.ok) {
 
   return Response.json(
     {
-      error: "Database save failed",
-      details: errorDetails
+      
+error: "Database save failed: " + errorDetails
+
+      
     },
     { status: 500 }
   );
