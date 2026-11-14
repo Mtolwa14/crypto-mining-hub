@@ -129,12 +129,19 @@ export async function POST(request) {
       }
     );
 
-    if (!insertResponse.ok) {
-      return Response.json(
-        { error: "Payment created but deposit record could not be saved" },
-        { status: 500 }
-      );
-    }
+    
+if (!insertResponse.ok) {
+  const errorDetails = await insertResponse.text();
+
+  return Response.json(
+    {
+      error: "Database save failed",
+      details: errorDetails
+    },
+    { status: 500 }
+  );
+}
+
 
     return Response.json({
       success: true,
