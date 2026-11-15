@@ -1,0 +1,128 @@
+
+import { NextResponse } from "next/server";
+
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+export async function POST(request) {
+  try {
+    if (!supabaseUrl || !anonKey || !serviceKey) {
+      return NextResponse.json(
+        { error: "Server configuration is incomplete." },
+        { status: 500 }
+      );
+    }
+
+    const authorization = request.headers.get("authorization");
+
+    if (!authorization?.startsWith("Bearer ")) {
+      return NextResponse.json(
+        { error: "Please sign in again." },
+        { status: 401 }
+      );
+    }
+
+    const token = authorization.slice(7);
+
+    const authResponse = await fetch(`${supabaseUrl}/auth/v1/user`, {
+      headers: {
+        apikey: anonKey,
+        Authorization: `Bearer ${token}`,
+      },
+      cache: "no-store",
+    });
+
+    if (!authResponse.ok) {
+      return NextResponse.json({ error: "Invalid session." }, { status: 401 });
+    }
+
+    const user = await authResponse.json();
+    const body = await request.json();
+
+    const amount = Number(body.amount);
+    const walletAddress = String(body.wallet_address || "").trim();
+
+    if (!Number.isFinite(amount) || amount <= 0 || amount > 1000000) {
+      return NextResponse.json(
+        { error: "Enter a valid withdrawal amount." },
+        { status: 400 }
+      );
+    }
+
+    if (walletAddress.length < 20 || walletAddress.length > 150) {
+      return NextResponse.json(
+        { error: "Enter a valid USDT BEP20 wallet address." },
+        { status: 400 }
+      );
+    }
+
+    const headers = {
+      apikey: serviceKey,
+      Authorization: `Bearer ${serviceKey}`,
+      "Content-Type": "application/json",
+    };
+
+    const plansResponse = await fetch(
+      `${supabaseUrl}/rest/v1/mining_plan_purchases?user_id=eq.${encodeURIComponent(
+        user.id
+      )}&status=eq.active&price_usdt=gte.10&select=id,plan_name,price_usdt`,
+      { headers, cache: "no-store" }
+    );
+
+    if (!plansResponse.ok) {
+      return NextResponse.json(
+        { error: "Could not verify your active plan." },
+        { status: 500 }
+      );
+    }
+
+    const purchases = await plansResponse.json();
+
+    if (!Array.isArray(purchases) || purchases.length === 0) {
+      return NextResponse.json(
+        { error: "Please purchase and activate a plan worth at least 10 USDT first." },
+        { status: 403 }
+      );
+    }
+
+    const insertResponse = await fetch(
+      `${supabaseUrl}/rest/v1/mining_withdrawals`,
+      {
+        method: "POST",
+        headers: {
+          ...headers,
+          Prefer: "return=representation",
+        },
+        body: JSON.stringify({
+          user_id: user.id,
+          amount,
+          currency: "USDT",
+          network: "BEP20",
+          wallet_address: walletAddress,
+          status: "Pending Review",
+        }),
+      }
+    );
+
+    const result = await insertResponse.json();
+
+    if (!insertResponse.ok) {
+      return NextResponse.json(
+        { error: result.message || "Could not save withdrawal request." },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({
+      success: true,
+      withdrawal: result[0],
+      message: "Your simulator withdrawal request is Pending Review.",
+    });
+  } catch (error) {
+    return NextResponse.json(
+      { error: "Unexpected server error." },
+      { status: 500 }
+    );
+  }
+}
