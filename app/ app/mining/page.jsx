@@ -38,9 +38,8 @@ export default function MiningPage() {
 
       setUser(data.user);
 
-      const saved = localStorage.getItem(
-        `cmh_mining_${data.user.id}`
-      );
+      const key = `cmh_mining_${data.user.id}`;
+      const saved = localStorage.getItem(key);
 
       if (saved) {
         try {
@@ -52,7 +51,7 @@ export default function MiningPage() {
           );
           setSeconds(Number(parsed.seconds || 0));
         } catch {
-          localStorage.removeItem(`cmh_mining_${data.user.id}`);
+          localStorage.removeItem(key);
         }
       }
 
@@ -120,7 +119,7 @@ export default function MiningPage() {
     const amount = Number(withdrawAmount);
 
     if (!Number.isFinite(amount) || amount <= 0) {
-      setMessage("Please enter a valid withdrawal amount.");
+      setMessage("Please enter a valid amount.");
       return;
     }
 
@@ -138,7 +137,7 @@ export default function MiningPage() {
 
     setWithdrawals((items) => [request, ...items]);
     setWithdrawAmount("");
-    setMessage("Your simulated withdrawal request has been submitted.");
+    setMessage("Withdrawal request submitted for simulator review.");
   }
 
   function formatTime(total) {
@@ -201,17 +200,14 @@ export default function MiningPage() {
 
       <div className="notice">
         <strong>MINING SIMULATOR</strong><br />
-        Mining rewards na withdrawal requests zinazoonekana hapa ni za
-        majaribio tu. Si cryptocurrency halisi, si uwekezaji na hakuna
-        malipo halisi yatakayotumwa. Withdrawal requests zitaonekana
-        kama Pending Review na hazitachakatwa kama malipo.
+        Rewards na withdrawal requests ni za majaribio tu.
+        Si cryptocurrency halisi, si uwekezaji na hakuna malipo
+        halisi yatakayotumwa. Maombi yataonekana Pending Review.
       </div>
 
       <section className="hero">
         <h1>Mining Dashboard ⛏️</h1>
-        <p className="muted">
-          Manage your mining activity, rewards and withdrawal requests.
-        </p>
+        <p className="muted">Manage your mining activity, rewards and withdrawal requests.</p>
       </section>
 
       <section className="stats">
@@ -222,27 +218,22 @@ export default function MiningPage() {
             {active ? "● Mining is active" : "● Mining is inactive"}
           </p>
         </div>
-
         <div className="card">
           <small>Mining Hashrate</small>
           <div className="value">{plan.speed} MH/s</div>
         </div>
-
         <div className="card">
           <small>Mining Time</small>
           <div className="value">{formatTime(seconds)}</div>
         </div>
-
         <div className="card">
           <small>Total Rewards</small>
           <div className="value">{reward.toFixed(8)}</div>
         </div>
-
         <div className="card">
           <small>Available Rewards</small>
           <div className="value">{availableBalance.toFixed(8)}</div>
         </div>
-
         <div className="card">
           <small>Pending Withdrawals</small>
           <div className="value">{pendingTotal.toFixed(8)}</div>
@@ -288,7 +279,6 @@ export default function MiningPage() {
         <p className="muted">
           Available balance: <strong>{availableBalance.toFixed(8)}</strong>
         </p>
-
         <form onSubmit={requestWithdrawal}>
           <input
             type="number"
@@ -303,10 +293,9 @@ export default function MiningPage() {
             Request Withdrawal
           </button>
         </form>
-
         {message && <p className="message">{message}</p>}
         <p className="muted">
-          Requests are recorded for simulator display only. No real payment is made.
+          Simulator requests only. No real payment is made.
         </p>
       </section>
 
@@ -318,11 +307,7 @@ export default function MiningPage() {
           <div className="table-wrap">
             <table>
               <thead>
-                <tr>
-                  <th>Amount</th>
-                  <th>Status</th>
-                  <th>Date</th>
-                </tr>
+                <tr><th>Amount</th><th>Status</th><th>Date</th></tr>
               </thead>
               <tbody>
                 {withdrawals.map((item) => (
@@ -346,11 +331,7 @@ export default function MiningPage() {
           <div className="table-wrap">
             <table>
               <thead>
-                <tr>
-                  <th>Plan</th>
-                  <th>Duration</th>
-                  <th>Date</th>
-                </tr>
+                <tr><th>Plan</th><th>Duration</th><th>Date</th></tr>
               </thead>
               <tbody>
                 {history.map((item) => (
