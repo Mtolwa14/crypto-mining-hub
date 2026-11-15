@@ -91,13 +91,17 @@ export async function POST(request) {
 
     const payment = await paymentResponse.json();
 
+    const expectedPayAmount = Number(payment.pay_amount);
+
     if (
       !paymentResponse.ok ||
       !payment.payment_id ||
-      !payment.pay_address
+      !payment.pay_address ||
+      !Number.isFinite(expectedPayAmount) ||
+      expectedPayAmount <= 0
     ) {
       return Response.json(
-        { error: "Could not create payment" },
+        { error: "Could not create a valid payment" },
         { status: 502 }
       );
     }
@@ -119,31 +123,26 @@ export async function POST(request) {
           currency: "USDT",
           network: "BEP20",
           status: "pending",
+          provider: "NOWPayments",
           provider_payment_id: String(payment.payment_id),
           order_id: orderId,
           pay_address: payment.pay_address,
           price_amount: amount,
-          pay_currency: payment.pay_currency || "usdtbsc"
+          pay_currency: payment.pay_currency || "usdtbsc",
+          expected_pay_amount: expectedPayAmount
         }),
         cache: "no-store"
       }
     );
 
-    
-if (!insertResponse.ok) {
-  const errorDetails = await insertResponse.text();
+    if (!insertResponse.ok) {
+      const errorDetails = await insertResponse.text();
 
-  return Response.json(
-    {
-      
-error: "Database save failed: " + errorDetails
-
-      
-    },
-    { status: 500 }
-  );
-}
-
+      return Response.json(
+        { error: "Database save failed: " + errorDetails },
+        { status: 500 }
+      );
+    }
 
     return Response.json({
       success: true,
@@ -154,6 +153,7 @@ error: "Database save failed: " + errorDetails
       pay_currency: payment.pay_currency,
       payment_status: payment.payment_status
     });
+
   } catch (error) {
     return Response.json(
       { error: "Deposit request failed" },
