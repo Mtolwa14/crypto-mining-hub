@@ -1,7 +1,7 @@
 
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { supabase } from "../lib/supabase";
 
 export default function Home() {
@@ -21,6 +21,10 @@ export default function Home() {
   const [depositError, setDepositError] = useState("");
   const [depositInfo, setDepositInfo] = useState(null);
   const [copyMessage, setCopyMessage] = useState("");
+
+  const [transactions, setTransactions] = useState([]);
+  const [transactionsLoading, setTransactionsLoading] = useState(false);
+  const [transactionsError, setTransactionsError] = useState("");
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -73,6 +77,46 @@ export default function Home() {
     };
   }, [user]);
 
+  const loadTransactions = useCallback(async () => {
+    if (!user) {
+      setTransactions([]);
+      return;
+    }
+
+    setTransactionsLoading(true);
+    setTransactionsError("");
+
+    try {
+      const { data, error } = await supabase
+        .from("transactions")
+        .select(
+          "id, type, amount, currency, network, status, price_amount, pay_currency, expected_pay_amount, actually_paid, created_at, paid_at, provider_payment_id"
+        )
+        .eq("user_id", user.id)
+        .eq("type", "deposit")
+        .order("created_at", { ascending: false })
+        .limit(20);
+
+      if (error) throw error;
+
+      setTransactions(data || []);
+    } catch (error) {
+      setTransactionsError(error.message || "Could not load deposit history.");
+    } finally {
+      setTransactionsLoading(false);
+    }
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) {
+      setTransactions([]);
+      setTransactionsError("");
+      return;
+    }
+
+    loadTransactions();
+  }, [user, loadTransactions]);
+
   async function handleAuth(e) {
     e.preventDefault();
     setLoading(true);
@@ -117,6 +161,8 @@ export default function Home() {
     setUser(null);
     setWallet(null);
     setDepositInfo(null);
+    setTransactions([]);
+    setTransactionsError("");
   }
 
   async function handleDeposit(e) {
@@ -161,6 +207,9 @@ export default function Home() {
       }
 
       setDepositInfo(result);
+      setDepositAmount("");
+
+      await loadTransactions();
     } catch (error) {
       setDepositError(error.message);
     } finally {
@@ -180,6 +229,46 @@ export default function Home() {
   }
 
   const money = Number(wallet?.balance || 0).toFixed(2);
+
+  const totalDeposits = transactions
+    .filter(
+      (transaction) =>
+        transaction.status === "approved" &&
+        Number(transaction.actually_paid || 0) > 0
+    )
+    .reduce(
+      (total, transaction) =>
+        total + Number(transaction.actually_paid || 0),
+      0
+    );
+
+  function formatDate(date) {
+    if (!date) return "Date unavailable";
+
+    return new Date(date).toLocaleString(undefined, {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit"
+    });
+  }
+
+  function statusLabel(status) {
+    if (status === "approved") return "Approved";
+    if (status === "pending" || status === "waiting") return "Pending";
+    if (status === "expired") return "Expired";
+    if (status === "failed") return "Failed";
+    if (status === "refunded") return "Refunded";
+
+    return status || "Pending";
+  }
+
+  function statusClass(status) {
+    if (status === "approved") return "approved";
+    if (status === "pending" || status === "waiting") return "pending";
+    return "other-status";
+  }
 
   return (
     <main className="app">
@@ -570,6 +659,100 @@ export default function Home() {
           font-size: 12px;
         }
 
+        .history-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          flex-wrap: wrap;
+          gap: 12px;
+          margin-bottom: 17px;
+        }
+
+        .refresh-btn {
+          padding: 9px 13px;
+          border: 1px solid #4b4230;
+          border-radius: 8px;
+          color: #f0c45b;
+          background: #1c1b13;
+          font-size: 11px;
+        }
+
+        .refresh-btn:disabled {
+          opacity: .5;
+          cursor: not-allowed;
+        }
+
+        .history-list {
+          display: grid;
+          gap: 11px;
+        }
+
+        .history-item {
+          padding: 15px;
+          border: 1px solid #30372e;
+          border-radius: 10px;
+          background: #171d17;
+          min-width: 0;
+        }
+
+        .history-top {
+          display: flex;
+          justify-content: space-between;
+          align-items: flex-start;
+          gap: 10px;
+          flex-wrap: wrap;
+        }
+
+        .history-amount {
+          color: #f0c45b;
+          font-size: 16px;
+          font-weight: 800;
+          overflow-wrap: anywhere;
+        }
+
+        .history-detail {
+          margin-top: 7px;
+          color: #899087;
+          font-size: 11px;
+          line-height: 1.7;
+          overflow-wrap: anywhere;
+        }
+
+        .history-status {
+          display: inline-block;
+          padding: 6px 9px;
+          border-radius: 20px;
+          font-size: 10px;
+          font-weight: bold;
+        }
+
+        .history-status.approved {
+          color: #73db91;
+          background: #173021;
+          border: 1px solid #28523a;
+        }
+
+        .history-status.pending {
+          color: #f0c45b;
+          background: #292316;
+          border: 1px solid #4b4230;
+        }
+
+        .history-status.other-status {
+          color: #c0c5bb;
+          background: #252a24;
+          border: 1px solid #394239;
+        }
+
+        .empty-history {
+          padding: 25px 12px;
+          text-align: center;
+          color: #899087;
+          font-size: 12px;
+          border: 1px dashed #394239;
+          border-radius: 10px;
+        }
+
         .footer {
           padding: 25px 10px;
           color: #687166;
@@ -773,6 +956,7 @@ export default function Home() {
             <a className="nav-link active" href="#overview">▦ Dashboard</a>
             <a className="nav-link" href="#wallet">◈ My Wallet</a>
             <a className="nav-link" href="#deposit">＋ Deposit</a>
+            <a className="nav-link" href="#history">▤ Deposit History</a>
             <a className="nav-link" href="#withdraw">↗ Withdraw</a>
             <a className="nav-link" href="#mining">⛏ Mining Plans</a>
           </aside>
@@ -806,8 +990,14 @@ export default function Home() {
               <div className="stat-card">
                 <div className="stat-icon">📥</div>
                 <div className="stat-label">Total Deposits</div>
-                <div className="stat-value">—</div>
-                <div className="stat-note">History integration pending</div>
+                <div className="stat-value">
+                  {transactionsLoading && transactions.length === 0
+                    ? "..."
+                    : `${totalDeposits.toFixed(4)} USDT`}
+                </div>
+                <div className="stat-note">
+                  Confirmed deposits only
+                </div>
               </div>
 
               <div className="stat-card">
@@ -947,6 +1137,92 @@ export default function Home() {
                     </div>
                   )}
                 </div>
+
+                <div className="panel" id="history">
+                  <div className="history-header">
+                    <div>
+                      <h2>Deposit History</h2>
+                      <p className="muted">
+                        Your latest 20 deposit transactions.
+                      </p>
+                    </div>
+
+                    <button
+                      type="button"
+                      className="refresh-btn"
+                      onClick={loadTransactions}
+                      disabled={transactionsLoading}
+                    >
+                      {transactionsLoading ? "LOADING..." : "↻ REFRESH"}
+                    </button>
+                  </div>
+
+                  {transactionsError && (
+                    <p className="error">
+                      History error: {transactionsError}
+                    </p>
+                  )}
+
+                  {transactionsLoading && transactions.length === 0 && (
+                    <p className="muted">Loading deposit history...</p>
+                  )}
+
+                  {!transactionsLoading && transactions.length === 0 && !transactionsError && (
+                    <div className="empty-history">
+                      No deposits yet. Your deposit transactions will appear here.
+                    </div>
+                  )}
+
+                  <div className="history-list">
+                    {transactions.map((transaction) => (
+                      <div className="history-item" key={transaction.id}>
+                        <div className="history-top">
+                          <div>
+                            <div className="history-amount">
+                              {transaction.price_amount != null
+                                ? `$${Number(transaction.price_amount).toFixed(2)} USD`
+                                : `${Number(transaction.amount || 0).toFixed(2)} ${transaction.currency || "USDT"}`}
+                            </div>
+
+                            <div className="history-detail">
+                              {transaction.actually_paid != null &&
+                              Number(transaction.actually_paid) > 0
+                                ? `Received: ${Number(transaction.actually_paid).toFixed(6)} ${transaction.pay_currency || "USDT"}`
+                                : transaction.expected_pay_amount != null
+                                  ? `Expected: ${transaction.expected_pay_amount} ${transaction.pay_currency || "USDT"}`
+                                  : "Payment amount awaiting confirmation"}
+                            </div>
+                          </div>
+
+                          <span
+                            className={`history-status ${statusClass(transaction.status)}`}
+                          >
+                            {statusLabel(transaction.status)}
+                          </span>
+                        </div>
+
+                        <div className="history-detail">
+                          Network: {transaction.network || "BEP20"}
+                        </div>
+
+                        <div className="history-detail">
+                          Date: {formatDate(transaction.created_at)}
+                        </div>
+
+                        {transaction.provider_payment_id && (
+                          <div className="history-detail">
+                            Payment ID: {transaction.provider_payment_id}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+
+                  <p className="muted" style={{ marginTop: 16 }}>
+                    Total Deposits includes approved payments only.
+                    Pending payments are not included.
+                  </p>
+                </div>
               </div>
 
               <div>
@@ -964,8 +1240,11 @@ export default function Home() {
                     </div>
                   </div>
 
-                  <button className="secondary-btn" disabled
-                    style={{ marginTop: 15, opacity: .5 }}>
+                  <button
+                    className="secondary-btn"
+                    disabled
+                    style={{ marginTop: 15, opacity: .5 }}
+                  >
                     WITHDRAWAL NOT AVAILABLE
                   </button>
                 </div>
