@@ -1,95 +1,91 @@
 
-import { randomUUID } from "crypto";
+import { NextResponse } from "next/server";
 
 const plans = {
   STARTER: 10,
   BASIC: 25,
   PRO: 50,
   PREMIUM: 100,
+  GOLD: 250,
+  PLATINUM: 500,
+  DIAMOND: 1000,
+  VIP: 2000,
 };
 
 export async function POST(request) {
   try {
-    const apiKey = process.env.NOWPAYMENTS_API_KEY;
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
     const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const nowPaymentsKey = process.env.NOWPAYMENTS_API_KEY;
 
-    if (!apiKey || !supabaseUrl || !anonKey || !serviceKey) {
-      return Response.json(
-        { error: "Server configuration missing" },
+    if (!supabaseUrl || !anonKey || !serviceKey || !nowPaymentsKey) {
+      return NextResponse.json(
+        { error: "Server configuration is incomplete." },
         { status: 500 }
       );
     }
 
-    // Verify logged-in user
     const authorization = request.headers.get("authorization");
 
     if (!authorization?.startsWith("Bearer ")) {
-      return Response.json(
-        { error: "Please log in first" },
+      return NextResponse.json(
+        { error: "Please log in first." },
         { status: 401 }
       );
     }
 
-    const authResponse = await fetch(
+    const token = authorization.slice(7);
+
+    const userResponse = await fetch(
       `${supabaseUrl}/auth/v1/user`,
       {
         headers: {
           apikey: anonKey,
-          Authorization: authorization,
+          Authorization: `Bearer ${token}`,
         },
         cache: "no-store",
       }
     );
 
-    if (!authResponse.ok) {
-      return Response.json(
-        { error: "Invalid login session" },
+    if (!userResponse.ok) {
+      return NextResponse.json(
+        { error: "Your login session is invalid." },
         { status: 401 }
       );
     }
 
-    const user = await authResponse.json();
+    const user = await userResponse.json();
+    const { plan_name } = await request.json();
 
-    if (!user.id) {
-      return Response.json(
-        { error: "User not found" },
-        { status: 401 }
-      );
-    }
+    const planName = String(plan_name || "").toUpperCase();
+    const price = plans[planName];
 
-    // Accept only approved plan names
-    const body = await request.json();
-    const planName = String(body.plan_name || "").toUpperCase();
-    const amount = plans[planName];
-
-    if (!amount) {
-      return Response.json(
-        { error: "Invalid mining plan" },
+    if (!price) {
+      return NextResponse.json(
+        { error: "Invalid investment plan." },
         { status: 400 }
       );
     }
 
-    const orderId = randomUUID();
+    const orderId = `CMH-${crypto.randomUUID()}`;
 
-    // Create USDT BEP20 payment
     const paymentResponse = await fetch(
       "https://api.nowpayments.io/v1/payment",
       {
         method: "POST",
         headers: {
-          "x-api-key": apiKey,
+          "x-api-key": nowPaymentsKey,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          price_amount: amount,
+          price_amount: price,
           price_currency: "usd",
           pay_currency: "usdtbsc",
           ipn_callback_url:
-            "https://crypto-mining-hub.vercel.app/api/nowpayments/ipn",
+            `${process.env.NEXT_PUBLIC_SITE_URL}/api/nowpayments/ipn`,
           order_id: orderId,
-          order_description: `Crypto Mining Hub ${planName} Plan`,
+          order_description: `${planName} Investment Capital`,
         }),
         cache: "no-store",
       }
@@ -97,22 +93,14 @@ export async function POST(request) {
 
     const payment = await paymentResponse.json();
 
-    const expectedPayAmount = Number(payment.pay_amount);
-
-    if (
-      !paymentResponse.ok ||
-      !payment.payment_id ||
-      !payment.pay_address ||
-      !Number.isFinite(expectedPayAmount) ||
-      expectedPayAmount <= 0
-    ) {
-      return Response.json(
-        { error: "Could not create a valid plan payment" },
+    if (!paymentResponse.ok || !payment.payment_id) {
+      console.error("NOWPayments error:", payment);
+      return NextResponse.json(
+        { error: "Could not create payment. Please try again." },
         { status: 502 }
       );
     }
 
-    // Save purchase as pending. It is NOT active yet.
     const insertResponse = await fetch(
       `${supabaseUrl}/rest/v1/mining_plan_purchases`,
       {
@@ -126,7 +114,8 @@ export async function POST(request) {
         body: JSON.stringify({
           user_id: user.id,
           plan_name: planName,
-          price_usdt: amount,
+          price_usdt: price,
+          principal_usdt: price,
           currency: "USDT",
           network: "BEP20",
           status: "pending",
@@ -134,40 +123,40 @@ export async function POST(request) {
           provider_payment_id: String(payment.payment_id),
           order_id: orderId,
           pay_address: payment.pay_address,
-          pay_currency: payment.pay_currency || "usdtbsc",
-          expected_pay_amount: expectedPayAmount,
+          pay_currency: payment.pay_currency,
+          expected_pay_amount: payment.pay_amount,
         }),
         cache: "no-store",
       }
     );
 
     if (!insertResponse.ok) {
-      const details = await insertResponse.text();
+      const error = await insertResponse.text();
+      console.error("Supabase insert error:", error);
 
-      return Response.json(
-        { error: "Could not save plan purchase: " + details },
+      return NextResponse.json(
+        { error: "Payment was created but the order could not be saved. Contact support before paying." },
         { status: 500 }
       );
     }
 
-    return Response.json({
+    return NextResponse.json({
       success: true,
-      plan_name: planName,
-      price_usdt: amount,
+      plan: planName,
+      price_usdt: price,
+      principal_usdt: price,
       payment_id: payment.payment_id,
-      order_id: orderId,
       pay_address: payment.pay_address,
       pay_amount: payment.pay_amount,
       pay_currency: payment.pay_currency,
-      payment_status: payment.payment_status,
-      message: "Payment created. Your plan will activate after payment confirmation.",
+      order_id: orderId,
+      message: "Payment created. Your investment capital will be recorded after payment confirmation.",
     });
-
   } catch (error) {
     console.error("Plan purchase error:", error);
 
-    return Response.json(
-      { error: "Plan purchase request failed" },
+    return NextResponse.json(
+      { error: "An unexpected error occurred." },
       { status: 500 }
     );
   }
