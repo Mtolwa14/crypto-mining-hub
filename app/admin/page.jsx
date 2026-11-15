@@ -3,7 +3,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { supabase } from "../lib/supabase";
+import { supabase } from "../../lib/supabase";
 
 const money = (value) =>
   new Intl.NumberFormat("en-US", {
@@ -154,8 +154,10 @@ export default function AdminPage() {
     setError("");
 
     try {
-      const { data: sessionData, error: sessionError } =
-        await supabase.auth.getSession();
+      const {
+        data: sessionData,
+        error: sessionError,
+      } = await supabase.auth.getSession();
 
       if (sessionError) throw sessionError;
 
@@ -175,7 +177,6 @@ export default function AdminPage() {
         cache: "no-store",
       });
 
-      // Soma majibu kama text kwanza ili HTML error isivunje JSON parser.
       const responseText = await response.text();
 
       let result;
@@ -190,7 +191,9 @@ export default function AdminPage() {
           .slice(0, 180);
 
         throw new Error(
-          `Server haikurudisha JSON. HTTP ${response.status}. ${preview || "Angalia API route na Vercel logs."}`
+          `Server haikurudisha JSON. HTTP ${response.status}. ${
+            preview || "Angalia Vercel Build Logs."
+          }`
         );
       }
 
@@ -202,7 +205,9 @@ export default function AdminPage() {
 
       setData(result);
     } catch (err) {
-      setError(err.message || "Imeshindikana kufungua Admin Dashboard.");
+      setError(
+        err.message || "Imeshindikana kufungua Admin Dashboard."
+      );
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -241,13 +246,21 @@ export default function AdminPage() {
       <div style={styles.container}>
         <header style={styles.header}>
           <div>
-            <div style={styles.brand}>CRYPTO MINING HUB</div>
+            <div style={styles.brand}>
+              CRYPTO MINING HUB
+            </div>
             <div style={{ color: "#9ca89f", marginTop: "6px" }}>
               Administrator Dashboard
             </div>
           </div>
 
-          <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+          <div
+            style={{
+              display: "flex",
+              gap: "10px",
+              flexWrap: "wrap",
+            }}
+          >
             <button
               style={styles.button}
               onClick={handleRefresh}
@@ -290,8 +303,13 @@ export default function AdminPage() {
             }}
           >
             <strong>Dashboard Error</strong>
-            <p style={{ overflowWrap: "anywhere" }}>{error}</p>
-            <button style={styles.button} onClick={handleRefresh}>
+            <p style={{ overflowWrap: "anywhere" }}>
+              {error}
+            </p>
+            <button
+              style={styles.button}
+              onClick={handleRefresh}
+            >
               Try Again
             </button>
           </div>
@@ -299,12 +317,15 @@ export default function AdminPage() {
 
         {data ? (
           <>
-            <h2 style={styles.heading}>Platform Overview</h2>
+            <h2 style={styles.heading}>
+              Platform Overview
+            </h2>
 
             <div
               style={{
                 display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))",
+                gridTemplateColumns:
+                  "repeat(auto-fit, minmax(190px, 1fr))",
                 gap: "15px",
               }}
             >
@@ -316,28 +337,36 @@ export default function AdminPage() {
               </div>
 
               <div style={styles.card}>
-                <div style={styles.label}>APPROVED DEPOSITS</div>
+                <div style={styles.label}>
+                  APPROVED DEPOSITS
+                </div>
                 <div style={styles.value}>
                   {money(data.stats?.totalDeposits)}
                 </div>
               </div>
 
               <div style={styles.card}>
-                <div style={styles.label}>APPROVED DEPOSIT COUNT</div>
+                <div style={styles.label}>
+                  APPROVED DEPOSIT COUNT
+                </div>
                 <div style={styles.value}>
                   {data.stats?.approvedDeposits ?? 0}
                 </div>
               </div>
 
               <div style={styles.card}>
-                <div style={styles.label}>PENDING DEPOSITS</div>
+                <div style={styles.label}>
+                  PENDING DEPOSITS
+                </div>
                 <div style={styles.value}>
                   {data.stats?.pendingDeposits ?? 0}
                 </div>
               </div>
 
               <div style={styles.card}>
-                <div style={styles.label}>WITHDRAWAL REQUESTS</div>
+                <div style={styles.label}>
+                  WITHDRAWAL REQUESTS
+                </div>
                 <div style={styles.value}>
                   {data.stats?.totalWithdrawals ?? 0}
                 </div>
@@ -345,7 +374,9 @@ export default function AdminPage() {
             </div>
 
             <section style={styles.section}>
-              <h2 style={styles.heading}>Registered Users</h2>
+              <h2 style={styles.heading}>
+                Registered Users
+              </h2>
 
               <DataTable
                 emptyText="Hakuna users waliopatikana."
@@ -355,14 +386,17 @@ export default function AdminPage() {
                   { label: "Role", key: "role" },
                   {
                     label: "Registered",
-                    render: (row) => dateFormat(row.created_at),
+                    render: (row) =>
+                      dateFormat(row.created_at),
                   },
                 ]}
               />
             </section>
 
             <section style={styles.section}>
-              <h2 style={styles.heading}>Deposit History</h2>
+              <h2 style={styles.heading}>
+                Deposit History
+              </h2>
 
               <DataTable
                 emptyText="Hakuna deposit records."
@@ -372,7 +406,11 @@ export default function AdminPage() {
                   {
                     label: "Amount",
                     render: (row) =>
-                      money(row.actually_paid || row.price_amount || row.amount),
+                      money(
+                        row.actually_paid ||
+                          row.price_amount ||
+                          row.amount
+                      ),
                   },
                   { label: "Currency", key: "currency" },
                   {
@@ -395,14 +433,17 @@ export default function AdminPage() {
                   },
                   {
                     label: "Date",
-                    render: (row) => dateFormat(row.created_at),
+                    render: (row) =>
+                      dateFormat(row.created_at),
                   },
                 ]}
               />
             </section>
 
             <section style={styles.section}>
-              <h2 style={styles.heading}>Withdrawal History</h2>
+              <h2 style={styles.heading}>
+                Withdrawal History
+              </h2>
 
               <DataTable
                 emptyText="Hakuna withdrawal records."
@@ -417,7 +458,8 @@ export default function AdminPage() {
                   { label: "Status", key: "status" },
                   {
                     label: "Date",
-                    render: (row) => dateFormat(row.created_at),
+                    render: (row) =>
+                      dateFormat(row.created_at),
                   },
                 ]}
               />
