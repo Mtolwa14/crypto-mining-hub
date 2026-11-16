@@ -35,13 +35,12 @@ export default function MiningPage() {
   const [walletAddress, setWalletAddress] = useState("");
   const [payment, setPayment] = useState(null);
   const [message, setMessage] = useState("");
+  const [messageType, setMessageType] = useState("info");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
 
   const activePurchase = purchases.find(
-    (item) =>
-      item.status === "active" &&
-      Number(item.price_usdt) >= 10
+    (item) => item.status === "active"
   );
 
   const activePlan = activePurchase
@@ -57,6 +56,11 @@ export default function MiningPage() {
 
   const availableBalance = Math.max(0, reward - pendingTotal);
 
+  function showMessage(text, type = "info") {
+    setMessage(text);
+    setMessageType(type);
+  }
+
   async function loadRecords() {
     const [purchaseResult, withdrawalResult] = await Promise.all([
       supabase
@@ -70,16 +74,16 @@ export default function MiningPage() {
         .order("created_at", { ascending: false }),
     ]);
 
-    if (!purchaseResult.error) {
-      setPurchases(purchaseResult.data || []);
-    } else {
+    if (purchaseResult.error) {
       console.error("Purchase loading error:", purchaseResult.error);
+    } else {
+      setPurchases(purchaseResult.data || []);
     }
 
-    if (!withdrawalResult.error) {
-      setWithdrawals(withdrawalResult.data || []);
-    } else {
+    if (withdrawalResult.error) {
       console.error("Withdrawal loading error:", withdrawalResult.error);
+    } else {
+      setWithdrawals(withdrawalResult.data || []);
     }
   }
 
@@ -118,6 +122,12 @@ export default function MiningPage() {
         await loadRecords();
       } catch (error) {
         console.error("Mining initialization error:", error);
+        if (mounted) {
+          showMessage(
+            "Could not load your mining dashboard. Please refresh the page.",
+            "error"
+          );
+        }
       } finally {
         if (mounted) setLoading(false);
       }
@@ -146,11 +156,7 @@ export default function MiningPage() {
 
     localStorage.setItem(
       `cmh_mining_${user.id}`,
-      JSON.stringify({
-        reward,
-        history,
-        seconds,
-      })
+      JSON.stringify({ reward, history, seconds })
     );
   }, [user, reward, history, seconds]);
 
@@ -171,10 +177,18 @@ export default function MiningPage() {
   async function buyPlan(planToBuy) {
     if (busy) return;
 
+    if (!planToBuy || !plans.some((p) => p.name === planToBuy.name)) {
+      showMessage("Please select a valid plan.", "error");
+      return;
+    }
+
     setSelectedPlan(planToBuy);
     setBusy(true);
-    setMessage(`Creating payment for ${planToBuy.name}...`);
     setPayment(null);
+    showMessage(
+      `Preparing ${planToBuy.name} payment. Please wait...`,
+      "info"
+    );
 
     try {
       const { data, error } = await supabase.auth.getSession();
@@ -184,8 +198,13 @@ export default function MiningPage() {
       const token = data.session?.access_token;
 
       if (!token) {
-        throw new Error("Please sign in again.");
+        throw new Error("Your session has expired. Please sign in again.");
       }
+
+      showMessage(
+        `Connecting to payment provider for ${planToBuy.name}...`,
+        "info"
+      );
 
       const response = await fetch("/api/plan-purchase", {
         method: "POST",
@@ -205,12 +224,15 @@ export default function MiningPage() {
       try {
         result = JSON.parse(responseText);
       } catch {
+        console.error("Invalid payment API response:", responseText);
         throw new Error(
-          `Invalid server response. HTTP ${response.status}.`
+          `Server returned an invalid response. HTTP ${response.status}. Please check the Vercel Runtime Logs.`
         );
       }
 
       if (!response.ok) {
+        console.error("Payment API error:", result);
+
         const details = [
           result.error,
           result.details,
@@ -226,21 +248,31 @@ export default function MiningPage() {
         );
       }
 
-      if (!result.pay_address || !result.payment_id) {
+      if (!result.payment_id) {
+        console.error("Incomplete payment response:", result);
         throw new Error(
-          "Payment response is incomplete. No payment address was returned."
+          "The payment provider did not return a payment ID. Please try again later."
         );
       }
 
-      setPayment(result);
-      setMessage(
-        `Payment instructions created successfully for ${planToBuy.name}.`
+      setPayment({
+        ...result,
+        plan: result.plan || planToBuy.name,
+        price_usdt: result.price_usdt || planToBuy.price,
+      });
+
+      showMessage(
+        `Payment created for ${planToBuy.name}. Follow the payment instructions below.`,
+        "success"
       );
 
       await loadRecords();
     } catch (error) {
       console.error("BUY PLAN ERROR:", error);
-      setMessage(error.message || "Payment request failed.");
+      showMessage(
+        error.message || "Payment request failed. Please try again.",
+        "error"
+      );
     } finally {
       setBusy(false);
     }
@@ -250,14 +282,14 @@ export default function MiningPage() {
     if (busy) return;
 
     setBusy(true);
-    setMessage("");
+    showMessage("Refreshing your records...", "info");
 
     try {
       await loadRecords();
-      setMessage("Plan and withdrawal status refreshed.");
+      showMessage("Your plan and withdrawal records have been refreshed.", "success");
     } catch (error) {
       console.error("Refresh error:", error);
-      setMessage("Could not refresh your records.");
+      showMessage("Could not refresh your records.", "error");
     } finally {
       setBusy(false);
     }
@@ -265,14 +297,15 @@ export default function MiningPage() {
 
   function startMining() {
     if (!activePlan) {
-      setMessage(
-        "You must activate a plan before starting the simulator."
+      showMessage(
+        "You must have a payment-confirmed active plan before starting the simulator.",
+        "error"
       );
       return;
     }
 
-    setMessage("");
     setActive(true);
+    showMessage("Mining simulator started.", "success");
   }
 
   function stopMining() {
@@ -289,37 +322,56 @@ export default function MiningPage() {
         ...items,
       ]);
     }
+
+    showMessage("Mining simulator stopped.", "info");
+  }
+
+  async function copyAddress() {
+    if (!payment?.pay_address) return;
+
+    try {
+      await navigator.clipboard.writeText(payment.pay_address);
+      showMessage("Payment address copied.", "success");
+    } catch {
+      showMessage(
+        "Could not copy automatically. Please select and copy the address.",
+        "error"
+      );
+    }
   }
 
   async function requestWithdrawal(event) {
     event.preventDefault();
-    setMessage("");
+
+    if (busy) return;
 
     const amount = Number(withdrawAmount);
 
     if (!activePurchase) {
-      setMessage(
-        "You must first activate a plan worth at least 10 USDT."
+      showMessage(
+        "You must first have a payment-confirmed active plan.",
+        "error"
       );
       return;
     }
 
     if (!Number.isFinite(amount) || amount <= 0) {
-      setMessage("Please enter a valid amount.");
+      showMessage("Please enter a valid amount.", "error");
       return;
     }
 
     if (amount > availableBalance) {
-      setMessage("Insufficient available simulator points.");
+      showMessage("Insufficient available simulator points.", "error");
       return;
     }
 
     if (walletAddress.trim().length < 20) {
-      setMessage("Please enter your USDT BEP20 wallet address.");
+      showMessage("Please enter your USDT BEP20 wallet address.", "error");
       return;
     }
 
     setBusy(true);
+    showMessage("Submitting demonstration withdrawal request...", "info");
 
     try {
       const { data, error } = await supabase.auth.getSession();
@@ -344,25 +396,34 @@ export default function MiningPage() {
         }),
       });
 
-      const result = await response.json();
+      const responseText = await response.text();
+      let result;
+
+      try {
+        result = JSON.parse(responseText);
+      } catch {
+        throw new Error(
+          `Invalid server response. HTTP ${response.status}.`
+        );
+      }
 
       if (!response.ok) {
-        throw new Error(
-          result.error || "Withdrawal request failed."
-        );
+        throw new Error(result.error || "Withdrawal request failed.");
       }
 
       setWithdrawAmount("");
       setWalletAddress("");
-
       await loadRecords();
 
-      setMessage(
-        "Simulator request saved. Status: Pending Review."
+      showMessage(
+        "Demonstration request saved. Status: Pending Review. No cryptocurrency payout is sent.",
+        "success"
       );
     } catch (error) {
-      setMessage(
-        error.message || "Withdrawal request failed."
+      console.error("Withdrawal error:", error);
+      showMessage(
+        error.message || "Withdrawal request failed.",
+        "error"
       );
     } finally {
       setBusy(false);
@@ -445,10 +506,7 @@ export default function MiningPage() {
 
         .stats {
           display: grid;
-          grid-template-columns: repeat(
-            auto-fit,
-            minmax(180px, 1fr)
-          );
+          grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
           gap: 14px;
         }
 
@@ -474,10 +532,7 @@ export default function MiningPage() {
 
         .plans {
           display: grid;
-          grid-template-columns: repeat(
-            auto-fit,
-            minmax(200px, 1fr)
-          );
+          grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
           gap: 14px;
           margin: 18px 0 28px;
         }
@@ -501,10 +556,13 @@ export default function MiningPage() {
           border-radius: 9px;
           padding: 12px 16px;
           font-weight: 800;
+          font-size: 14px;
+          touch-action: manipulation;
+          -webkit-tap-highlight-color: transparent;
         }
 
         button:disabled {
-          opacity: 0.45;
+          opacity: 0.5;
           cursor: not-allowed;
         }
 
@@ -520,6 +578,10 @@ export default function MiningPage() {
           color: #111;
           width: 100%;
           margin-top: 10px;
+          min-height: 46px;
+          position: relative;
+          z-index: 2;
+          pointer-events: auto;
         }
 
         .refresh {
@@ -578,6 +640,7 @@ export default function MiningPage() {
           padding: 14px;
           border-radius: 9px;
           margin: 10px 0;
+          font-size: 16px;
         }
 
         .withdraw {
@@ -607,6 +670,18 @@ export default function MiningPage() {
           overflow-wrap: anywhere;
         }
 
+        .message.success {
+          border-color: #237c52;
+          background: #10271c;
+          color: #70e5a8;
+        }
+
+        .message.error {
+          border-color: #a33d3d;
+          background: #2b1111;
+          color: #ff9999;
+        }
+
         .payment-box {
           margin-top: 20px;
           padding: 18px;
@@ -618,6 +693,21 @@ export default function MiningPage() {
 
         .payment-box p {
           line-height: 1.6;
+        }
+
+        .address {
+          padding: 12px;
+          background: #080b0a;
+          border: 1px solid #665329;
+          border-radius: 8px;
+          overflow-wrap: anywhere;
+          word-break: break-all;
+        }
+
+        .copy {
+          margin-top: 10px;
+          background: #d9ad42;
+          color: #111;
         }
 
         .footer {
@@ -650,10 +740,7 @@ export default function MiningPage() {
       `}</style>
 
       <header className="top">
-        <div className="brand">
-          ₿ CRYPTO MINING HUB
-        </div>
-
+        <div className="brand">₿ CRYPTO MINING HUB</div>
         <a className="back" href="/">
           ← Back to Dashboard
         </a>
@@ -662,15 +749,12 @@ export default function MiningPage() {
       <div className="notice">
         <strong>IMPORTANT PLATFORM NOTICE</strong>
         <br />
-        Mining rewards displayed here are simulated
-        demonstration points. They are not real cryptocurrency,
-        are not verified investment profits, and cannot be paid
-        out as real money.
+        Mining rewards displayed here are simulated demonstration
+        points. They are not real cryptocurrency, verified investment
+        profits, or money available for payout.
         <br />
-        Plan payment instructions are provided through
-        NOWPayments. A payment must be independently confirmed
-        before a plan is activated. Displayed simulator points
-        do not represent investment returns.
+        Plan payments are processed through NOWPayments. A payment
+        must be independently confirmed before a plan is activated.
         <br />
         Withdrawal requests on this simulator are demonstration
         records only. No actual cryptocurrency payout is sent.
@@ -686,61 +770,43 @@ export default function MiningPage() {
       <section className="stats">
         <div className="card">
           <small>Mining Status</small>
-          <div className="value">
-            {active ? "RUNNING" : "STOPPED"}
-          </div>
+          <div className="value">{active ? "RUNNING" : "STOPPED"}</div>
           <p className={active ? "status" : "muted"}>
-            {active
-              ? "● Simulator is running"
-              : "● Simulator is inactive"}
+            {active ? "● Simulator is running" : "● Simulator is inactive"}
           </p>
         </div>
 
         <div className="card">
           <small>Active Plan</small>
-          <div className="value">
-            {activePlan?.name || "NONE"}
-          </div>
+          <div className="value">{activePlan?.name || "NONE"}</div>
           <p className="muted">
-            {activePlan
-              ? `${money(activePlan.price)} plan`
-              : "No active plan"}
+            {activePlan ? `${money(activePlan.price)} plan` : "No active plan"}
           </p>
         </div>
 
         <div className="card">
           <small>Mining Speed</small>
-          <div className="value">
-            {activePlan?.speed || 0} MH/s
-          </div>
+          <div className="value">{activePlan?.speed || 0} MH/s</div>
         </div>
 
         <div className="card">
           <small>Mining Time</small>
-          <div className="value">
-            {formatTime(seconds)}
-          </div>
+          <div className="value">{formatTime(seconds)}</div>
         </div>
 
         <div className="card">
           <small>Total Simulated Rewards</small>
-          <div className="value">
-            {reward.toFixed(8)}
-          </div>
+          <div className="value">{reward.toFixed(8)}</div>
         </div>
 
         <div className="card">
           <small>Available Simulator Points</small>
-          <div className="value">
-            {availableBalance.toFixed(8)}
-          </div>
+          <div className="value">{availableBalance.toFixed(8)}</div>
         </div>
 
         <div className="card">
           <small>Pending Requests</small>
-          <div className="value">
-            {pendingTotal.toFixed(8)}
-          </div>
+          <div className="value">{pendingTotal.toFixed(8)}</div>
         </div>
       </section>
 
@@ -755,8 +821,8 @@ export default function MiningPage() {
         }}
       >
         <h2>Investment Plan Options</h2>
-
         <button
+          type="button"
           className="refresh"
           onClick={refreshStatus}
           disabled={busy}
@@ -771,7 +837,7 @@ export default function MiningPage() {
       </p>
 
       {message && (
-        <div className="message" role="status" aria-live="polite">
+        <div className={`message ${messageType}`} role="status" aria-live="polite">
           {message}
         </div>
       )}
@@ -786,36 +852,37 @@ export default function MiningPage() {
           >
             <h3>{item.name}</h3>
 
-            <div className="value">
-              {money(item.price)} USDT
-            </div>
-
+            <div className="value">{money(item.price)} USDT</div>
             <p className="muted">Plan amount</p>
-
             <p>{item.speed} MH/s simulator speed</p>
-
             <p className="muted">
               Simulated rate: {item.rate} points/sec
             </p>
 
             <button
+              type="button"
               className="choose"
-              disabled={active || busy}
-              onClick={() => {
+              disabled={busy}
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
                 setSelectedPlan(item);
                 setPayment(null);
-                setMessage("");
+                showMessage(`${item.name} selected.`, "info");
               }}
             >
-              {selectedPlan.name === item.name
-                ? "Selected"
-                : "Select Plan"}
+              {selectedPlan.name === item.name ? "Selected" : "Select Plan"}
             </button>
 
             <button
+              type="button"
               className="buy"
-              disabled={busy || active}
-              onClick={() => buyPlan(item)}
+              disabled={busy}
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                buyPlan(item);
+              }}
             >
               {busy && selectedPlan.name === item.name
                 ? "Processing..."
@@ -834,8 +901,7 @@ export default function MiningPage() {
           </p>
 
           <p>
-            <strong>Plan Amount:</strong>{" "}
-            {money(payment.price_usdt)} USDT
+            <strong>Plan Amount:</strong> {money(payment.price_usdt)} USDT
           </p>
 
           <p>
@@ -844,192 +910,231 @@ export default function MiningPage() {
 
           <p>
             <strong>Payment Amount:</strong>{" "}
-            {payment.pay_amount ??
-              payment.expected_pay_amount ??
-              "Not provided"}{" "}
+            {payment.pay_amount ?? payment.expected_pay_amount ?? "Not provided"}{" "}
             {payment.pay_currency || "USDT"}
           </p>
 
           <p>
             <strong>Payment Address:</strong>
-            <br />
-            {payment.pay_address ||
-              "Payment address not returned"}
           </p>
+
+          {payment.pay_address ? (
+            <>
+              <div className="address">{payment.pay_address}</div>
+              <button
+                type="button"
+                className="copy"
+                onClick={copyAddress}
+              >
+                Copy Payment Address
+              </button>
+            </>
+          ) : (
+            <p className="pending">
+              Payment address has not been returned. Contact support before
+              sending any funds.
+            </p>
+          )}
+
+          {payment.payment_url && (
+            <p>
+              <a
+                href={payment.payment_url}
+                target="_blank"
+                rel="noreferrer"
+                style={{ color: "#e7bd55" }}
+              >
+                Open payment page
+              </a>
+            </p>
+          )}
 
           <p>
-            <strong>Order ID:</strong>{" "}
-            {payment.order_id || "-"}
+            <strong>Payment ID:</strong> {payment.payment_id}
           </p>
 
           <p className="muted">
-            Do not send funds until you have independently checked
-            the payment details and confirmed the payment request.
-            Your plan must not be considered active until payment
-            is verified by the payment provider.
+            Send only the requested currency on the specified network.
+            Do not send funds if the address or network is missing or unclear.
+            Your plan will only activate after payment confirmation.
           </p>
         </section>
       )}
 
-      {activePlan && (
-        <section className="card" style={{ marginTop: 25 }}>
-          <h2>Your Activated Plan</h2>
-
-          <p className="active-label">
-            ✓ {activePlan.name} — ACTIVE
-          </p>
-
-          <p className="muted">
-            Payment confirmation has been recorded.
-            Simulator access is enabled.
-          </p>
-        </section>
-      )}
-
-      <section className="card" style={{ marginTop: 25 }}>
-        <h2>Mining Control</h2>
+      <section className="card" style={{ marginTop: 30 }}>
+        <h2>Mining Simulator</h2>
 
         <p className="muted">
-          {activePlan
-            ? `Activated plan: ${activePlan.name}`
-            : "Purchase and activate a plan before starting the simulator."}
+          This feature generates demonstration points only. It does not
+          perform real cryptocurrency mining or generate cash returns.
         </p>
 
         <div className="actions">
           <button
+            type="button"
             className="start"
             onClick={startMining}
             disabled={active || !activePlan}
           >
-            ▶ Start Mining
+            ▶ Start Simulator
           </button>
 
           <button
+            type="button"
             className="stop"
             onClick={stopMining}
             disabled={!active}
           >
-            ■ Stop Mining
+            ■ Stop Simulator
           </button>
         </div>
       </section>
 
       <section className="card" style={{ marginTop: 25 }}>
-        <h2>Request Withdrawal</h2>
+        <h2>Withdrawal Request</h2>
 
         <p className="muted">
-          This section currently records simulator withdrawal
-          requests only. It does not send cryptocurrency.
-        </p>
-
-        <p className="muted">
-          Available simulator points:{" "}
-          <strong>{availableBalance.toFixed(8)}</strong>
+          Demonstration requests only. Withdrawal currency shown is USDT
+          BEP20. No real payout is made.
         </p>
 
         <form onSubmit={requestWithdrawal}>
+          <label>Amount</label>
           <input
             type="number"
-            min="0.00000001"
+            min="0"
             step="0.00000001"
-            placeholder="Enter simulator points amount"
+            placeholder="Enter amount"
             value={withdrawAmount}
-            onChange={(event) =>
-              setWithdrawAmount(event.target.value)
-            }
-            required
+            onChange={(event) => setWithdrawAmount(event.target.value)}
           />
 
+          <label>USDT BEP20 Wallet Address</label>
           <input
             type="text"
-            placeholder="USDT BEP20 wallet address"
+            placeholder="Enter your BEP20 wallet address"
             value={walletAddress}
-            onChange={(event) =>
-              setWalletAddress(event.target.value)
-            }
-            required
+            onChange={(event) => setWalletAddress(event.target.value)}
           />
 
-          <p className="muted">
-            Network: USDT BEP20 only. This creates a
-            Pending Review demonstration record.
-          </p>
-
           <button
-            className="withdraw"
             type="submit"
+            className="withdraw"
             disabled={busy}
           >
-            {busy ? "Submitting..." : "Submit Request"}
+            {busy ? "Processing..." : "Submit Demonstration Request"}
           </button>
         </form>
       </section>
 
       <section className="card" style={{ marginTop: 25 }}>
-        <h2>Withdrawal History</h2>
+        <h2>Plan Purchase History</h2>
 
-        {withdrawals.length === 0 ? (
-          <p className="muted">No withdrawal requests yet.</p>
-        ) : (
-          <div className="table-wrap">
-            <table>
-              <thead>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Plan</th>
+                <th>Amount</th>
+                <th>Status</th>
+                <th>Date</th>
+              </tr>
+            </thead>
+
+            <tbody>
+              {purchases.length === 0 ? (
                 <tr>
-                  <th>Amount</th>
-                  <th>Network</th>
-                  <th>Status</th>
-                  <th>Date</th>
+                  <td colSpan="4">No plan purchases yet.</td>
                 </tr>
-              </thead>
-
-              <tbody>
-                {withdrawals.map((item) => (
+              ) : (
+                purchases.map((item) => (
                   <tr key={item.id}>
-                    <td>{Number(item.amount).toFixed(8)}</td>
-                    <td>{item.network}</td>
-                    <td className="pending">{item.status}</td>
+                    <td>{item.plan_name}</td>
+                    <td>{money(item.price_usdt)}</td>
+                    <td
+                      className={
+                        item.status === "active" ? "active-label" : "pending"
+                      }
+                    >
+                      {item.status}
+                    </td>
                     <td>{formatDate(item.created_at)}</td>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
       </section>
 
       <section className="card" style={{ marginTop: 25 }}>
-        <h2>Mining History</h2>
+        <h2>Withdrawal History</h2>
 
-        {history.length === 0 ? (
-          <p className="muted">No mining sessions yet.</p>
-        ) : (
-          <div className="table-wrap">
-            <table>
-              <thead>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Amount</th>
+                <th>Network</th>
+                <th>Status</th>
+                <th>Date</th>
+              </tr>
+            </thead>
+
+            <tbody>
+              {withdrawals.length === 0 ? (
                 <tr>
-                  <th>Plan</th>
-                  <th>Duration</th>
-                  <th>Date</th>
+                  <td colSpan="4">No withdrawal requests yet.</td>
                 </tr>
-              </thead>
+              ) : (
+                withdrawals.map((item) => (
+                  <tr key={item.id}>
+                    <td>{Number(item.amount || 0).toFixed(8)}</td>
+                    <td>{item.network || "BEP20"}</td>
+                    <td className="pending">{item.status}</td>
+                    <td>{formatDate(item.created_at)}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
 
-              <tbody>
-                {history.map((item) => (
+      <section className="card" style={{ marginTop: 25 }}>
+        <h2>Mining Session History</h2>
+
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Plan</th>
+                <th>Duration</th>
+                <th>Date</th>
+              </tr>
+            </thead>
+
+            <tbody>
+              {history.length === 0 ? (
+                <tr>
+                  <td colSpan="3">No simulator sessions yet.</td>
+                </tr>
+              ) : (
+                history.map((item) => (
                   <tr key={item.id}>
                     <td>{item.plan}</td>
                     <td>{formatTime(item.duration)}</td>
                     <td>{item.date}</td>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
       </section>
 
       <footer className="footer">
-        © {new Date().getFullYear()} Crypto Mining Hub.
-        All rights reserved.
+        © {new Date().getFullYear()} Crypto Mining Hub. All rights reserved.
       </footer>
     </main>
   );
