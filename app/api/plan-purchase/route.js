@@ -1,6 +1,8 @@
 
 import { NextResponse } from "next/server";
 
+export const runtime = "nodejs";
+
 const plans = {
   STARTER: 10,
   BASIC: 25,
@@ -18,10 +20,32 @@ export async function POST(request) {
     const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
     const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
     const nowPaymentsKey = process.env.NOWPAYMENTS_API_KEY;
+    const siteUrl = process.env.NEXT_PUBLIC_SITE_URL;
 
-    if (!supabaseUrl || !anonKey || !serviceKey || !nowPaymentsKey) {
+    if (!supabaseUrl || !anonKey || !serviceKey || !nowPaymentsKey || !siteUrl) {
       return NextResponse.json(
-        { error: "Server configuration is incomplete." },
+        {
+          error: "Missing server configuration.",
+          details: "Check the required environment variables in Vercel.",
+        },
+        { status: 500 }
+      );
+    }
+
+    let callbackUrl;
+
+    try {
+      const baseUrl = new URL(siteUrl);
+      if (baseUrl.protocol !== "https:") {
+        throw new Error("HTTPS is required.");
+      }
+      callbackUrl = `${baseUrl.origin}/api/nowpayments/ipn`;
+    } catch {
+      return NextResponse.json(
+        {
+          error: "Invalid website URL configuration.",
+          details: "Check NEXT_PUBLIC_SITE_URL in Vercel.",
+        },
         { status: 500 }
       );
     }
@@ -37,16 +61,13 @@ export async function POST(request) {
 
     const token = authorization.slice(7);
 
-    const userResponse = await fetch(
-      `${supabaseUrl}/auth/v1/user`,
-      {
-        headers: {
-          apikey: anonKey,
-          Authorization: `Bearer ${token}`,
-        },
-        cache: "no-store",
-      }
-    );
+    const userResponse = await fetch(`${supabaseUrl}/auth/v1/user`, {
+      headers: {
+        apikey: anonKey,
+        Authorization: `Bearer ${token}`,
+      },
+      cache: "no-store",
+    });
 
     if (!userResponse.ok) {
       return NextResponse.json(
@@ -56,9 +77,9 @@ export async function POST(request) {
     }
 
     const user = await userResponse.json();
-    const { plan_name } = await request.json();
+    const body = await request.json();
 
-    const planName = String(plan_name || "").toUpperCase();
+    const planName = String(body.plan_name || "").toUpperCase();
     const price = plans[planName];
 
     if (!price) {
@@ -82,21 +103,39 @@ export async function POST(request) {
           price_amount: price,
           price_currency: "usd",
           pay_currency: "usdtbsc",
-          ipn_callback_url:
-            `${process.env.NEXT_PUBLIC_SITE_URL}/api/nowpayments/ipn`,
+          ipn_callback_url: callbackUrl,
           order_id: orderId,
-          order_description: `${planName} Investment Capital`,
+          order_description: `${planName} Plan Payment`,
         }),
         cache: "no-store",
       }
     );
 
-    const payment = await paymentResponse.json();
+    const responseText = await paymentResponse.text();
+
+    let payment;
+
+    try {
+      payment = JSON.parse(responseText);
+    } catch {
+      payment = { message: responseText };
+    }
 
     if (!paymentResponse.ok || !payment.payment_id) {
-      console.error("NOWPayments error:", payment);
+      console.error("NOWPayments rejected payment:", {
+        status: paymentResponse.status,
+        response: payment,
+      });
+
       return NextResponse.json(
-        { error: "Could not create payment. Please try again." },
+        {
+          error: "NOWPayments could not create the payment.",
+          details:
+            payment.message ||
+            payment.error ||
+            JSON.stringify(payment).slice(0, 500),
+          provider_status: paymentResponse.status,
+        },
         { status: 502 }
       );
     }
@@ -115,7 +154,7 @@ export async function POST(request) {
           user_id: user.id,
           plan_name: planName,
           price_usdt: price,
-          principal_usdt: price,
+          principal_usdt: null,
           currency: "USDT",
           network: "BEP20",
           status: "pending",
@@ -131,11 +170,15 @@ export async function POST(request) {
     );
 
     if (!insertResponse.ok) {
-      const error = await insertResponse.text();
-      console.error("Supabase insert error:", error);
+      const dbError = await insertResponse.text();
+
+      console.error("Supabase order save error:", dbError);
 
       return NextResponse.json(
-        { error: "Payment was created but the order could not be saved. Contact support before paying." },
+        {
+          error: "Payment was created but the order could not be saved.",
+          details: "Contact support before making any payment.",
+        },
         { status: 500 }
       );
     }
@@ -144,19 +187,21 @@ export async function POST(request) {
       success: true,
       plan: planName,
       price_usdt: price,
-      principal_usdt: price,
       payment_id: payment.payment_id,
       pay_address: payment.pay_address,
       pay_amount: payment.pay_amount,
       pay_currency: payment.pay_currency,
       order_id: orderId,
-      message: "Payment created. Your investment capital will be recorded after payment confirmation.",
+      message: "Payment created. Wait for payment confirmation.",
     });
   } catch (error) {
-    console.error("Plan purchase error:", error);
+    console.error("Plan purchase server error:", error);
 
     return NextResponse.json(
-      { error: "An unexpected error occurred." },
+      {
+        error: "An unexpected server error occurred.",
+        details: error.message,
+      },
       { status: 500 }
     );
   }
