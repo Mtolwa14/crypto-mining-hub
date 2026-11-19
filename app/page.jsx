@@ -50,6 +50,12 @@ export default function Home() {
   const [authMsg, setAuthMsg] = useState("");
   const [authBusy, setAuthBusy] = useState(false);
 
+  const [signupReferralCode, setSignupReferralCode] = useState("");
+  const [accountReferralCode, setAccountReferralCode] = useState("");
+  const [referralApplyBusy, setReferralApplyBusy] = useState(false);
+  const [referralApplyMsg, setReferralApplyMsg] = useState("");
+  const [referralAlreadyLinked, setReferralAlreadyLinked] = useState(false);
+
   const [section, setSection] = useState("overview");
   const [wallet, setWallet] = useState(null);
   const [deposits, setDeposits] = useState([]);
@@ -75,6 +81,14 @@ export default function Home() {
   const [withdrawError, setWithdrawError] = useState("");
 
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const codeFromLink = params.get("ref");
+
+    if (codeFromLink) {
+      setSignupReferralCode(codeFromLink.trim().toUpperCase());
+      setMode("register");
+    }
+
     supabase.auth.getSession().then(({ data }) => {
       setUser(data.session?.user || null);
     });
@@ -164,17 +178,26 @@ export default function Home() {
 
     try {
       if (mode === "register") {
+        const referralCode = signupReferralCode.trim().toUpperCase();
+
         const { data, error } = await supabase.auth.signUp({
           email,
           password,
-          options: { emailRedirectTo: window.location.origin },
+          options: {
+            emailRedirectTo: window.location.origin,
+            data: referralCode
+              ? { referral_code: referralCode }
+              : {},
+          },
         });
 
         if (error) throw error;
 
-        setAuthMsg(data.session
-          ? "Account created successfully."
-          : "Account created. Please check your email to confirm.");
+        setAuthMsg(
+          data.session
+            ? "Account created successfully."
+            : "Account created. Please check your email to confirm."
+        );
       } else {
         const { error } = await supabase.auth.signInWithPassword({
           email,
@@ -194,6 +217,8 @@ export default function Home() {
     await supabase.auth.signOut();
     setUser(null);
     setPayment(null);
+    setReferralData(null);
+    setReferralAlreadyLinked(false);
   }
 
   async function getToken() {
@@ -362,11 +387,22 @@ export default function Home() {
     setReferralError("");
 
     try {
-      const { data, error } = await supabase.rpc("get_my_referral_dashboard");
+      const [dashboard, profile] = await Promise.all([
+        supabase.rpc("get_my_referral_dashboard"),
+        supabase
+          .from("referral_profiles")
+          .select("referred_by")
+          .eq("user_id", user.id)
+          .maybeSingle(),
+      ]);
 
-      if (error) throw error;
+      if (dashboard.error) throw dashboard.error;
 
-      setReferralData(data || null);
+      setReferralData(dashboard.data || null);
+
+      if (!profile.error) {
+        setReferralAlreadyLinked(Boolean(profile.data?.referred_by));
+      }
     } catch (err) {
       setReferralError(err.message || "Could not load referral details.");
       setReferralData(null);
@@ -375,10 +411,83 @@ export default function Home() {
     }
   }
 
+  async function applyReferralCode(e) {
+    e.preventDefault();
+    setReferralApplyBusy(true);
+    setReferralApplyMsg("");
+
+    try {
+      const code = accountReferralCode.trim().toUpperCase();
+
+      if (!code) {
+        throw new Error("Enter a referral code.");
+      }
+
+      if (referralAlreadyLinked) {
+        throw new Error("A referral code has already been applied to this account.");
+      }
+
+      const { data, error } = await supabase.rpc("set_my_referrer", {
+        p_code: code,
+      });
+
+      if (error) throw error;
+
+      setReferralAlreadyLinked(true);
+      setAccountReferralCode("");
+      setReferralApplyMsg(
+        typeof data === "string" ? data : "Referral code applied successfully."
+      );
+      await loadReferralData();
+    } catch (err) {
+      setReferralApplyMsg(err.message || "Could not apply referral code.");
+    } finally {
+      setReferralApplyBusy(false);
+    }
+  }
+
+  async function shareInvite() {
+    const code = referralData?.referral_code;
+
+    if (!code) {
+      setReferralError("Your referral code is not available yet.");
+      return;
+    }
+
+    const inviteUrl =
+      `${window.location.origin}/?ref=${encodeURIComponent(code)}`;
+
+    const shareText =
+      `Join Crypto Mining Hub using my referral code: ${code}\n${inviteUrl}`;
+
+    try {
+      if (navigator.share) {
+        await navigator.share({
+          title: "Crypto Mining Hub Invitation",
+          text: shareText,
+          url: inviteUrl,
+        });
+      } else {
+        await navigator.clipboard.writeText(shareText);
+        setReferralError("");
+        setActionMsg("Invite link copied successfully.");
+      }
+    } catch (err) {
+      if (err.name !== "AbortError") {
+        try {
+          await navigator.clipboard.writeText(shareText);
+          setActionMsg("Invite link copied successfully.");
+        } catch {
+          setReferralError("Could not share or copy the invite link.");
+        }
+      }
+    }
+  }
+
   function go(id) {
     setSection(id);
 
-    if (id === "referral") {
+    if (id === "referral" || id === "account") {
       loadReferralData();
     }
 
@@ -473,6 +582,7 @@ export default function Home() {
               <div className="balance" style={{ fontSize: "25px" }}>
                 {referralData.referral_code || "Not available"}
               </div>
+
               <button
                 className="copybtn"
                 type="button"
@@ -480,8 +590,17 @@ export default function Home() {
               >
                 COPY CODE
               </button>
+
+              <button
+                className="primary"
+                type="button"
+                onClick={shareInvite}
+              >
+                SHARE INVITE
+              </button>
+
               <div className="smallnote">
-                Share this code with people you invite.
+                Share your invite link. New users can register using your referral code.
               </div>
             </div>
 
@@ -717,6 +836,21 @@ export default function Home() {
                 placeholder="Password"
               />
 
+              {mode === "register" && (
+                <>
+                  <label className="label">Referral Code (Optional)</label>
+                  <input
+                    className="field"
+                    type="text"
+                    value={signupReferralCode}
+                    onChange={(e) =>
+                      setSignupReferralCode(e.target.value.toUpperCase())
+                    }
+                    placeholder="Enter referral code"
+                  />
+                </>
+              )}
+
               <button className="primary" disabled={authBusy}>
                 {authBusy ? "PLEASE WAIT..." : mode === "login" ? "LOGIN" : "CREATE ACCOUNT"}
               </button>
@@ -792,7 +926,6 @@ export default function Home() {
               </div>
             </div>
 
-            {/* REFERRAL SECTION: visible near the top of dashboard */}
             {referralPanel()}
 
             {loadError && <p className="error">Data issue: {loadError}</p>}
@@ -1102,6 +1235,39 @@ export default function Home() {
                     {user.email}
                   </div>
                   <span className="network">Supabase authenticated account</span>
+
+                  <h3 style={{ marginTop: 22 }}>Apply Referral Code</h3>
+                  {referralAlreadyLinked ? (
+                    <div className="empty">
+                      A referral code has already been linked to this account.
+                    </div>
+                  ) : (
+                    <form onSubmit={applyReferralCode}>
+                      <label className="label">Referral Code</label>
+                      <input
+                        className="field"
+                        type="text"
+                        value={accountReferralCode}
+                        onChange={(e) =>
+                          setAccountReferralCode(e.target.value.toUpperCase())
+                        }
+                        placeholder="Enter referral code"
+                        required
+                      />
+                      <button
+                        className="primary"
+                        type="submit"
+                        disabled={referralApplyBusy}
+                      >
+                        {referralApplyBusy ? "APPLYING..." : "APPLY CODE"}
+                      </button>
+                    </form>
+                  )}
+
+                  {referralApplyMsg && (
+                    <p className="message">{referralApplyMsg}</p>
+                  )}
+
                   <button
                     className="secondary"
                     style={{ marginTop: 14 }}
