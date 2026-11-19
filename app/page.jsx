@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -22,6 +23,7 @@ const nav = [
   ["wallet", "◉", "My Wallet"],
   ["deposits", "↙", "Deposit History"],
   ["withdrawals", "↗", "Withdrawals"],
+  ["profit", "％", "Profit & Loss"],
   ["account", "⚙", "Account"],
 ];
 
@@ -35,7 +37,7 @@ const dateText = (v) => (v ? new Date(v).toLocaleString() : "—");
 
 const statusClass = (s) => {
   const status = String(s || "").toLowerCase();
-  if (["approved", "active", "finished", "paid"].includes(status)) return "ok";
+  if (["approved", "active", "finished", "paid", "posted"].includes(status)) return "ok";
   if (["pending", "waiting", "confirming", "pending review"].includes(status)) return "pending";
   return "other";
 };
@@ -53,6 +55,7 @@ export default function Home() {
   const [deposits, setDeposits] = useState([]);
   const [purchases, setPurchases] = useState([]);
   const [withdrawals, setWithdrawals] = useState([]);
+  const [profits, setProfits] = useState([]);
 
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState("");
@@ -85,7 +88,7 @@ export default function Home() {
     setLoading(true);
     setLoadError("");
 
-    const [w, d, p, wr] = await Promise.all([
+    const [w, d, p, wr, pr] = await Promise.all([
       supabase.from("wallets")
         .select("balance,currency,network")
         .eq("user_id", user.id)
@@ -111,9 +114,15 @@ export default function Home() {
         .eq("user_id", user.id)
         .order("created_at", { ascending: false })
         .limit(50),
+
+      supabase.from("investment_profit_allocations")
+        .select("id,period_name,source,plan_name,principal_usdt,profit_usdt,created_at")
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false })
+        .limit(100),
     ]);
 
-    const errors = [w.error, d.error, p.error, wr.error]
+    const errors = [w.error, d.error, p.error, wr.error, pr.error]
       .filter(Boolean)
       .map((e) => e.message);
 
@@ -121,6 +130,7 @@ export default function Home() {
     setDeposits(d.error ? [] : d.data || []);
     setPurchases(p.error ? [] : p.data || []);
     setWithdrawals(wr.error ? [] : wr.data || []);
+    setProfits(pr.error ? [] : pr.data || []);
 
     if (errors.length) setLoadError(errors.join(" • "));
 
@@ -134,6 +144,7 @@ export default function Home() {
       setDeposits([]);
       setPurchases([]);
       setWithdrawals([]);
+      setProfits([]);
     }
   }, [user, loadData]);
 
@@ -252,7 +263,6 @@ export default function Home() {
 
   async function submitWithdrawal(e) {
     e.preventDefault();
-
     setBusyAction("withdraw");
     setWithdrawMsg("");
     setWithdrawError("");
@@ -266,8 +276,8 @@ export default function Home() {
         throw new Error("Minimum withdrawal is 10 USDT.");
       }
 
-      if (amount > balance) {
-        throw new Error("Insufficient displayed wallet balance.");
+      if (balance < 10 || amount > balance) {
+        throw new Error("Insufficient available wallet balance.");
       }
 
       if (address.length < 20 || address.length > 150) {
@@ -298,7 +308,6 @@ export default function Home() {
       setWithdrawOpen(false);
       setWithdrawAmount("10");
       setWithdrawAddress("");
-
       await loadData();
     } catch (err) {
       setWithdrawError(err.message || "Withdrawal request failed.");
@@ -336,6 +345,15 @@ export default function Home() {
     (sum, x) => sum + Number(x.price_usdt || 0),
     0
   );
+
+  const totalProfit = profits.reduce(
+    (sum, x) => sum + Number(x.profit_usdt || 0),
+    0
+  );
+
+  const totalWithdrawn = withdrawals
+    .filter((x) => ["approved", "paid", "completed"].includes(String(x.status || "").toLowerCase()))
+    .reduce((sum, x) => sum + Number(x.amount || 0), 0);
 
   function go(id) {
     setSection(id);
@@ -425,7 +443,7 @@ export default function Home() {
         .statvalue{display:block;margin-top:8px;color:#b8edca;font-weight:900;font-size:clamp(16px,2vw,23px);overflow-wrap:anywhere}
         .statnote{margin-top:7px;font-size:10px;color:#6d8672}
         .columns{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(250px,.8fr);gap:18px;align-items:start}
-        .panel{padding:21px;margin-bottom:18px;min-width:0}
+        .panel{padding:21px;margin-bottom:18px;min-width:0;scroll-margin-top:18px}
         .panel h2{font-size:16px;color:#b8edca;margin:0 0 7px}
         .panel h3{font-size:13px;color:#e7f1e8;margin:0 0 8px}
         .panelhead{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px}
@@ -441,7 +459,7 @@ export default function Home() {
         .field{display:block;width:100%;padding:13px;border:1px solid #35513a;border-radius:10px;outline:none;background:#080e09;color:white}
         .field:focus{border-color:#68cf8d}
         .primary{display:block;width:100%;padding:13px;margin-top:12px;border:none;border-radius:10px;color:#07130a;background:linear-gradient(135deg,#a8edbe,#40ac72);font-weight:900}
-        .primary:disabled{opacity:.58;cursor:not-allowed}
+        .primary:disabled{opacity:.45;cursor:not-allowed}
         .list{display:grid;gap:10px;margin-top:13px}
         .item{padding:14px;border:1px solid #2b3e30;border-radius:12px;background:#111a13;min-width:0}
         .itemtop{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap}
@@ -585,9 +603,9 @@ export default function Home() {
               </div>
 
               <div className="stat">
-                <div className="statlabel">Pending Plans</div>
-                <span className="statvalue">{pendingPlans.length}</span>
-                <div className="statnote">{money(pendingAmount)} USDT pending</div>
+                <div className="statlabel">Total Profit</div>
+                <span className="statvalue">{money(totalProfit)} USDT</span>
+                <div className="statnote">Recorded allocations</div>
               </div>
             </div>
 
@@ -638,7 +656,7 @@ export default function Home() {
 
                   <div className="plans">
                     {plans.map((plan) => (
-                      <div className="plan" id={`plan-${plan.name}`} key={plan.name}>
+                      <div className="plan" key={plan.name}>
                         <div className="planname">{plan.name}</div>
                         <div className="price">${plan.price.toLocaleString("en-US")}</div>
                         <div className="planhint">USDT · BEP20</div>
@@ -734,13 +752,13 @@ export default function Home() {
                   </div>
 
                   {!wallet && !loading && (
-                    <p className="muted">Wallet record not found.</p>
+                    <p className="muted">Wallet record not found. Make a deposit to activate your wallet.</p>
                   )}
 
                   <button
                     className="primary"
                     type="button"
-                    disabled={loading || !wallet || !!busyAction}
+                    disabled={loading || !!busyAction}
                     onClick={() => {
                       setWithdrawOpen(!withdrawOpen);
                       setSection("wallet");
@@ -751,7 +769,13 @@ export default function Home() {
                     {withdrawOpen ? "CLOSE WITHDRAWAL FORM" : "WITHDRAW"}
                   </button>
 
-                  {withdrawOpen && (
+                  {withdrawOpen && Number(wallet?.balance || 0) < 10 && (
+                    <div className="withdrawnote" style={{ marginTop: 14 }}>
+                      Minimum withdrawal is $10 USDT. Your available balance is {money(wallet?.balance)} USDT. You need at least $10 before submitting a withdrawal request.
+                    </div>
+                  )}
+
+                  {withdrawOpen && Number(wallet?.balance || 0) >= 10 && (
                     <form className="withdrawform" onSubmit={submitWithdrawal}>
                       <h3>Withdraw USDT</h3>
                       <p className="muted">
@@ -789,7 +813,7 @@ export default function Home() {
                       <button
                         className="primary"
                         type="submit"
-                        disabled={!!busyAction}
+                        disabled={!!busyAction || Number(withdrawAmount) < 10 || Number(withdrawAmount) > Number(wallet?.balance || 0)}
                       >
                         {busyAction === "withdraw" ? "SUBMITTING..." : "SUBMIT WITHDRAWAL"}
                       </button>
@@ -835,15 +859,9 @@ export default function Home() {
                               {w.status || "Pending"}
                             </span>
                           </div>
-                          <div className="detail">
-                            Network: {w.network || "BEP20"}
-                          </div>
-                          <div className="detail">
-                            Wallet: {w.wallet_address || "—"}
-                          </div>
-                          <div className="detail">
-                            Submitted: {dateText(w.created_at)}
-                          </div>
+                          <div className="detail">Network: {w.network || "BEP20"}</div>
+                          <div className="detail">Wallet: {w.wallet_address || "—"}</div>
+                          <div className="detail">Submitted: {dateText(w.created_at)}</div>
                         </div>
                       ))}
                     </div>
@@ -852,10 +870,44 @@ export default function Home() {
 
                 <div className="panel" id="profit">
                   <h2>Profit &amp; Loss</h2>
-                  <p className="muted">Verified business results only.</p>
-                  <div className="withdrawnote">
-                    No verified profit or loss data is connected yet. Actual results will appear when recorded. No projected or guaranteed earnings are displayed.
+                  <p className="muted">Your recorded investment profit allocations.</p>
+
+                  <div className="walletbox">
+                    <div className="muted">TOTAL RECORDED PROFIT</div>
+                    <div className="balance">{money(totalProfit)} USDT</div>
+                    <span className="network">Recorded allocations only</span>
                   </div>
+
+                  <div className="withdrawnote" style={{ marginTop: 12 }}>
+                    Total approved withdrawals: {money(totalWithdrawn)} USDT.
+                    Profit figures are based only on records entered and allocated by the platform. They are not guaranteed earnings.
+                  </div>
+
+                  {profits.length === 0 ? (
+                    <div className="empty" style={{ marginTop: 14 }}>
+                      No profit allocations have been recorded for your account yet.
+                    </div>
+                  ) : (
+                    <div className="list">
+                      {profits.map((p) => (
+                        <div className="item" key={p.id}>
+                          <div className="itemtop">
+                            <span className="itemamount">
+                              +{money(p.profit_usdt)} USDT
+                            </span>
+                            <span className="badge ok">ALLOCATED</span>
+                          </div>
+                          <div className="detail">
+                            Period: {p.period_name || "—"} · Plan: {p.plan_name || "—"}
+                          </div>
+                          <div className="detail">
+                            Principal: {money(p.principal_usdt)} USDT · Source: {p.source || "—"}
+                          </div>
+                          <div className="detail">Recorded: {dateText(p.created_at)}</div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 <div className="panel" id="account">
