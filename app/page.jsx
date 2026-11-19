@@ -769,13 +769,7 @@ export default function Home() {
                     {withdrawOpen ? "CLOSE WITHDRAWAL FORM" : "WITHDRAW"}
                   </button>
 
-                  {withdrawOpen && Number(wallet?.balance || 0) < 10 && (
-                    <div className="withdrawnote" style={{ marginTop: 14 }}>
-                      Minimum withdrawal is $10 USDT. Your available balance is {money(wallet?.balance)} USDT. You need at least $10 before submitting a withdrawal request.
-                    </div>
-                  )}
-
-                  {withdrawOpen && Number(wallet?.balance || 0) >= 10 && (
+                  {withdrawOpen && (
                     <form className="withdrawform" onSubmit={submitWithdrawal}>
                       <h3>Withdraw USDT</h3>
                       <p className="muted">
@@ -787,7 +781,6 @@ export default function Home() {
                         className="field"
                         type="number"
                         min="10"
-                        max={Number(wallet?.balance || 0)}
                         step="0.01"
                         value={withdrawAmount}
                         onChange={(e) => setWithdrawAmount(e.target.value)}
@@ -809,6 +802,12 @@ export default function Home() {
                       <p className="detail">
                         Available balance: {money(wallet?.balance)} USDT
                       </p>
+
+                      {Number(wallet?.balance || 0) < 10 && (
+                        <div className="withdrawnote" style={{ marginTop: 12 }}>
+                          Your available balance is below the $10 minimum. You can fill in the form, but the request cannot be submitted until your wallet has at least $10 USDT.
+                        </div>
+                      )}
 
                       <button
                         className="primary"
