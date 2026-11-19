@@ -110,7 +110,6 @@ export async function POST(request) {
     }
 
     const payload = JSON.parse(rawBody);
-
     const sortedPayload = JSON.stringify(sortObject(payload));
 
     const expectedSignature = createHmac("sha512", ipnSecret)
@@ -145,7 +144,7 @@ export async function POST(request) {
       });
     }
 
-    // First check whether this payment belongs to a deposit
+    // First check whether payment belongs to a deposit
     const transactions = await getPaymentRecord(
       supabaseUrl,
       serviceKey,
@@ -161,6 +160,7 @@ export async function POST(request) {
       );
     }
 
+    // DEPOSIT FLOW - no referral commission on deposits
     if (transactions.length === 1) {
       const transaction = transactions[0];
 
@@ -194,7 +194,6 @@ export async function POST(request) {
         record: transaction,
       });
 
-      // Preserve the existing deposit wallet-crediting process
       const creditResponse = await fetch(
         `${supabaseUrl}/rest/v1/rpc/credit_nowpayments_usdt`,
         {
@@ -213,6 +212,11 @@ export async function POST(request) {
       );
 
       if (!creditResponse.ok) {
+        console.error(
+          "Deposit credit error:",
+          await creditResponse.text()
+        );
+
         return Response.json(
           { error: "Wallet credit failed" },
           { status: 500 }
@@ -228,7 +232,7 @@ export async function POST(request) {
       });
     }
 
-    // If it is not a deposit, check for a mining plan purchase
+    // MINING PLAN FLOW
     const purchases = await getPaymentRecord(
       supabaseUrl,
       serviceKey,
@@ -277,6 +281,7 @@ export async function POST(request) {
       );
     }
 
+    // Verify payment directly with NOWPayments first
     await verifyPayment({
       apiKey,
       paymentId,
@@ -284,62 +289,42 @@ export async function POST(request) {
       record: purchase,
     });
 
-    // Activate only after NOWPayments confirms the payment
+    // Atomically activate plan and pay referral commissions
     const activateResponse = await fetch(
-      `${supabaseUrl}/rest/v1/mining_plan_purchases?id=eq.${encodeURIComponent(purchase.id)}&status=eq.pending`,
+      `${supabaseUrl}/rest/v1/rpc/activate_mining_plan_with_referrals`,
       {
-        method: "PATCH",
+        method: "POST",
         headers: {
           apikey: serviceKey,
           Authorization: `Bearer ${serviceKey}`,
           "Content-Type": "application/json",
-          Prefer: "return=representation",
         },
         body: JSON.stringify({
-          status: "active",
-          activated_at: new Date().toISOString(),
+          p_purchase_id: purchase.id,
         }),
         cache: "no-store",
       }
     );
 
     if (!activateResponse.ok) {
+      console.error(
+        "Mining plan activation error:",
+        await activateResponse.text()
+      );
+
       return Response.json(
-        { error: "Could not activate mining plan" },
+        { error: "Mining plan activation or referral payment failed" },
         { status: 500 }
       );
     }
 
-    const activated = await activateResponse.json();
-
-    if (activated.length === 0) {
-      // Check whether another IPN request already activated it
-      const latest = await getPaymentRecord(
-        supabaseUrl,
-        serviceKey,
-        "mining_plan_purchases",
-        paymentId,
-        "id,status,plan_name"
-      );
-
-      if (latest.length === 1 && latest[0].status === "active") {
-        return Response.json({
-          success: true,
-          type: "plan_purchase",
-          message: "plan_already_activated",
-        });
-      }
-
-      return Response.json(
-        { error: "Plan activation needs review" },
-        { status: 409 }
-      );
-    }
+    const result = await activateResponse.json();
 
     return Response.json({
       success: true,
       type: "plan_purchase",
       plan_name: purchase.plan_name,
+      referral_commission: result,
       message: "Mining plan activated successfully",
     });
 
