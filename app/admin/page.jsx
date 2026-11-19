@@ -12,23 +12,18 @@ const money = (value) =>
     minimumFractionDigits: 2,
   }).format(Number(value || 0));
 
-const dateFormat = (value) => {
-  if (!value) return "—";
-  return new Date(value).toLocaleString();
-};
+const dateFormat = (value) =>
+  value ? new Date(value).toLocaleString() : "—";
 
 const styles = {
   page: {
     minHeight: "100vh",
     background: "#080b0a",
     color: "#f5f5f5",
-    padding: "20px",
+    padding: "18px",
     fontFamily: "Arial, sans-serif",
   },
-  container: {
-    maxWidth: "1450px",
-    margin: "0 auto",
-  },
+  container: { maxWidth: "1500px", margin: "0 auto" },
   header: {
     display: "flex",
     justifyContent: "space-between",
@@ -37,11 +32,7 @@ const styles = {
     gap: "14px",
     marginBottom: "25px",
   },
-  brand: {
-    color: "#d6ad45",
-    fontSize: "24px",
-    fontWeight: "bold",
-  },
+  brand: { color: "#d6ad45", fontSize: "24px", fontWeight: "bold" },
   button: {
     background: "#d6ad45",
     color: "#111",
@@ -58,38 +49,24 @@ const styles = {
     padding: "18px",
     minWidth: 0,
   },
-  label: {
-    color: "#9ca89f",
-    fontSize: "12px",
-    marginBottom: "9px",
-  },
+  label: { color: "#9ca89f", fontSize: "12px", marginBottom: "9px" },
   value: {
     color: "#d6ad45",
-    fontSize: "24px",
+    fontSize: "23px",
     fontWeight: "bold",
     overflowWrap: "anywhere",
   },
-  heading: {
-    color: "#d6ad45",
-    fontSize: "19px",
-    marginBottom: "14px",
-  },
-  section: {
-    marginTop: "28px",
-  },
+  heading: { color: "#d6ad45", fontSize: "19px", marginBottom: "14px" },
+  section: { marginTop: "28px" },
   tableWrap: {
     overflowX: "auto",
     background: "#121816",
     border: "1px solid #29352e",
     borderRadius: "10px",
   },
-  table: {
-    width: "100%",
-    borderCollapse: "collapse",
-    minWidth: "750px",
-  },
+  table: { width: "100%", borderCollapse: "collapse", minWidth: "750px" },
   cell: {
-    padding: "13px",
+    padding: "12px",
     borderBottom: "1px solid #29352e",
     textAlign: "left",
     fontSize: "13px",
@@ -106,30 +83,38 @@ const styles = {
   },
 };
 
-function DataTable({ columns, rows, emptyText }) {
+function Status({ value }) {
+  const status = String(value || "unknown").toLowerCase();
+  let color = "#e8c45c";
+
+  if (
+    ["approved", "finished", "confirmed", "completed", "active", "posted", "paid"].includes(status)
+  ) color = "#40d98b";
+
+  if (
+    ["rejected", "failed", "expired", "cancelled", "suspended"].includes(status)
+  ) color = "#ff7777";
+
+  return <span style={{ color, fontWeight: "bold" }}>{status.toUpperCase()}</span>;
+}
+
+function DataTable({ columns, rows, emptyText = "No records found." }) {
   return (
     <div style={styles.tableWrap}>
       <table style={styles.table}>
         <thead>
           <tr>
             {columns.map((column) => (
-              <th
-                key={column.label}
-                style={{ ...styles.cell, color: "#d6ad45" }}
-              >
+              <th key={column.label} style={{ ...styles.cell, color: "#d6ad45" }}>
                 {column.label}
               </th>
             ))}
           </tr>
         </thead>
-
         <tbody>
           {rows.length === 0 ? (
             <tr>
-              <td
-                colSpan={columns.length}
-                style={{ ...styles.cell, color: "#9ca89f" }}
-              >
+              <td colSpan={columns.length} style={{ ...styles.cell, color: "#9ca89f" }}>
                 {emptyText}
               </td>
             </tr>
@@ -138,9 +123,7 @@ function DataTable({ columns, rows, emptyText }) {
               <tr key={row.id || index}>
                 {columns.map((column) => (
                   <td key={column.label} style={styles.cell}>
-                    {column.render
-                      ? column.render(row)
-                      : row[column.key] ?? "—"}
+                    {column.render ? column.render(row) : row[column.key] ?? "—"}
                   </td>
                 ))}
               </tr>
@@ -149,26 +132,6 @@ function DataTable({ columns, rows, emptyText }) {
         </tbody>
       </table>
     </div>
-  );
-}
-
-function Status({ value }) {
-  const status = String(value || "unknown").toLowerCase();
-
-  let color = "#e8c45c";
-
-  if (["approved", "finished", "confirmed", "completed"].includes(status)) {
-    color = "#40d98b";
-  }
-
-  if (["rejected", "failed", "expired", "cancelled"].includes(status)) {
-    color = "#ff7777";
-  }
-
-  return (
-    <span style={{ color, fontWeight: "bold" }}>
-      {status.toUpperCase()}
-    </span>
   );
 }
 
@@ -188,22 +151,18 @@ export default function AdminPage() {
     setError("");
 
     try {
-      const {
-        data: sessionData,
-        error: sessionError,
-      } = await supabase.auth.getSession();
+      const { data: sessionData, error: sessionError } =
+        await supabase.auth.getSession();
 
       if (sessionError) throw sessionError;
 
       const token = sessionData?.session?.access_token;
-
       if (!token) {
         router.replace("/");
         return;
       }
 
       const response = await fetch("/api/admin/overview", {
-        method: "GET",
         headers: {
           Authorization: `Bearer ${token}`,
           Accept: "application/json",
@@ -211,21 +170,19 @@ export default function AdminPage() {
         cache: "no-store",
       });
 
-      const text = await response.text();
+      const raw = await response.text();
       let result;
 
       try {
-        result = JSON.parse(text);
+        result = JSON.parse(raw);
       } catch {
         throw new Error(
-          `Server haijarudisha JSON. HTTP ${response.status}. Angalia API route na Vercel Logs.`
+          `Server haijarudisha JSON. HTTP ${response.status}.`
         );
       }
 
       if (!response.ok) {
-        throw new Error(
-          result?.error || `HTTP ${response.status}`
-        );
+        throw new Error(result?.error || `HTTP ${response.status}`);
       }
 
       setData(result);
@@ -241,12 +198,6 @@ export default function AdminPage() {
     loadDashboard();
   }, [loadDashboard]);
 
-  async function handleRefresh() {
-    setRefreshing(true);
-    setMessage("");
-    await loadDashboard();
-  }
-
   async function handleLogout() {
     await supabase.auth.signOut();
     router.replace("/");
@@ -258,7 +209,7 @@ export default function AdminPage() {
     const confirmed = window.confirm(
       user.is_banned
         ? `Unaruhusu tena akaunti ya ${user.email}?`
-        : `Una uhakika unataka kusimamisha akaunti ya ${user.email}?`
+        : `Unataka kusimamisha akaunti ya ${user.email}?`
     );
 
     if (!confirmed) return;
@@ -268,13 +219,7 @@ export default function AdminPage() {
     setMessage("");
 
     try {
-      const {
-        data: sessionData,
-        error: sessionError,
-      } = await supabase.auth.getSession();
-
-      if (sessionError) throw sessionError;
-
+      const { data: sessionData } = await supabase.auth.getSession();
       const token = sessionData?.session?.access_token;
 
       if (!token) {
@@ -287,21 +232,14 @@ export default function AdminPage() {
         headers: {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
-          Accept: "application/json",
         },
-        body: JSON.stringify({
-          action,
-          userId: user.id,
-        }),
+        body: JSON.stringify({ action, userId: user.id }),
       });
 
       const result = await response.json();
+      if (!response.ok) throw new Error(result?.error || "User action failed.");
 
-      if (!response.ok) {
-        throw new Error(result?.error || "User action failed.");
-      }
-
-      setMessage(result.message || "User updated successfully.");
+      setMessage(result.message || "User updated.");
       await loadDashboard();
     } catch (err) {
       setError(err.message || "Imeshindikana kubadilisha user.");
@@ -314,6 +252,12 @@ export default function AdminPage() {
   const deposits = data?.deposits || [];
   const withdrawals = data?.withdrawals || [];
   const wallets = data?.wallets || [];
+  const transactions = data?.transactions || [];
+  const planPurchases = data?.planPurchases || [];
+  const planRules = data?.planRules || [];
+  const profitPeriods = data?.profitPeriods || [];
+  const profitAllocations = data?.profitAllocations || [];
+  const stats = data?.stats || {};
 
   const emailByUser = useMemo(() => {
     const map = {};
@@ -323,73 +267,55 @@ export default function AdminPage() {
     return map;
   }, [users]);
 
-  const filteredUsers = useMemo(() => {
-    const q = search.toLowerCase().trim();
+  const q = search.toLowerCase().trim();
 
-    if (!q) return users;
-
-    return users.filter((user) =>
-      `${user.email} ${user.id} ${user.role}`
+  const filterRows = (rows, fields) => {
+    if (!q) return rows;
+    return rows.filter((row) =>
+      fields
+        .map((field) => String(row[field] ?? ""))
+        .join(" ")
         .toLowerCase()
         .includes(q)
     );
-  }, [users, search]);
+  };
 
-  const filteredWallets = useMemo(() => {
-    const q = search.toLowerCase().trim();
+  const filteredUsers = users.filter((user) =>
+    `${user.email} ${user.id} ${user.role}`.toLowerCase().includes(q)
+  );
 
-    if (!q) return wallets;
+  const filteredWallets = wallets.filter((item) =>
+    `${emailByUser[item.user_id] || ""} ${item.user_id} ${item.currency} ${item.network}`
+      .toLowerCase().includes(q)
+  );
 
-    return wallets.filter((wallet) =>
-      `${emailByUser[wallet.user_id] || ""} ${wallet.user_id} ${wallet.currency} ${wallet.network}`
-        .toLowerCase()
-        .includes(q)
-    );
-  }, [wallets, search, emailByUser]);
+  const filteredDeposits = deposits.filter((item) =>
+    `${emailByUser[item.user_id] || ""} ${item.user_id} ${item.status} ${item.currency} ${item.provider_payment_id || ""}`
+      .toLowerCase().includes(q)
+  );
 
-  const filteredDeposits = useMemo(() => {
-    const q = search.toLowerCase().trim();
+  const filteredWithdrawals = withdrawals.filter((item) =>
+    `${emailByUser[item.user_id] || ""} ${item.user_id} ${item.status} ${item.currency} ${item.wallet_address}`
+      .toLowerCase().includes(q)
+  );
 
-    if (!q) return deposits;
+  const filteredTransactions = filterRows(transactions, [
+    "user_id", "type", "status", "currency", "tx_hash", "provider_payment_id",
+  ]);
 
-    return deposits.filter((item) =>
-      `${emailByUser[item.user_id] || ""} ${item.user_id} ${item.status} ${item.currency} ${item.provider_payment_id || ""}`
-        .toLowerCase()
-        .includes(q)
-    );
-  }, [deposits, search, emailByUser]);
+  const filteredPurchases = filterRows(planPurchases, [
+    "user_id", "plan_name", "status", "currency", "provider_payment_id",
+  ]);
 
-  const filteredWithdrawals = useMemo(() => {
-    const q = search.toLowerCase().trim();
+  const filteredPlans = filterRows(planRules, ["plan_name", "enabled"]);
 
-    if (!q) return withdrawals;
+  const filteredPeriods = filterRows(profitPeriods, [
+    "period_name", "source", "status",
+  ]);
 
-    return withdrawals.filter((item) =>
-      `${emailByUser[item.user_id] || ""} ${item.user_id} ${item.status} ${item.currency}`
-        .toLowerCase()
-        .includes(q)
-    );
-  }, [withdrawals, search, emailByUser]);
-
-  const transactions = useMemo(() => {
-    return [...deposits, ...withdrawals].sort(
-      (a, b) =>
-        new Date(b.created_at || 0).getTime() -
-        new Date(a.created_at || 0).getTime()
-    );
-  }, [deposits, withdrawals]);
-
-  const filteredTransactions = useMemo(() => {
-    const q = search.toLowerCase().trim();
-
-    if (!q) return transactions;
-
-    return transactions.filter((item) =>
-      `${emailByUser[item.user_id] || ""} ${item.user_id} ${item.status} ${item.type} ${item.currency} ${item.tx_hash || ""}`
-        .toLowerCase()
-        .includes(q)
-    );
-  }, [transactions, search, emailByUser]);
+  const filteredAllocations = filterRows(profitAllocations, [
+    "user_id", "period_name", "plan_name", "source",
+  ]);
 
   const tabs = [
     ["overview", "Overview"],
@@ -398,6 +324,10 @@ export default function AdminPage() {
     ["deposits", "Deposits"],
     ["withdrawals", "Withdrawals"],
     ["transactions", "Transactions"],
+    ["plans", "Investment Plans"],
+    ["purchases", "Plan Purchases"],
+    ["profits", "Profit Periods"],
+    ["allocations", "Profit Allocations"],
   ];
 
   if (loading) {
@@ -425,19 +355,20 @@ export default function AdminPage() {
           <div style={{ display: "flex", gap: "9px", flexWrap: "wrap" }}>
             <button
               style={styles.button}
-              onClick={handleRefresh}
               disabled={refreshing}
+              onClick={async () => {
+                setRefreshing(true);
+                await loadDashboard();
+              }}
             >
               {refreshing ? "Loading..." : "Refresh"}
             </button>
-
             <button
               style={{ ...styles.button, background: "#26332b", color: "#fff" }}
               onClick={() => router.push("/")}
             >
               User Dashboard
             </button>
-
             <button
               style={{ ...styles.button, background: "#8b2929", color: "#fff" }}
               onClick={handleLogout}
@@ -451,9 +382,7 @@ export default function AdminPage() {
           <div style={{ ...styles.card, borderColor: "#a63d3d", marginBottom: "18px" }}>
             <strong style={{ color: "#ff9999" }}>Error</strong>
             <p style={{ overflowWrap: "anywhere" }}>{error}</p>
-            <button style={styles.button} onClick={handleRefresh}>
-              Try Again
-            </button>
+            <button style={styles.button} onClick={loadDashboard}>Try Again</button>
           </div>
         )}
 
@@ -463,15 +392,13 @@ export default function AdminPage() {
           </div>
         )}
 
-        <nav
-          style={{
-            display: "flex",
-            gap: "8px",
-            overflowX: "auto",
-            paddingBottom: "12px",
-            marginBottom: "22px",
-          }}
-        >
+        <nav style={{
+          display: "flex",
+          gap: "8px",
+          overflowX: "auto",
+          paddingBottom: "12px",
+          marginBottom: "22px",
+        }}>
           {tabs.map(([key, label]) => (
             <button
               key={key}
@@ -495,7 +422,7 @@ export default function AdminPage() {
           <div style={{ marginBottom: "20px" }}>
             <input
               style={styles.input}
-              placeholder="Search email, user ID, status, currency..."
+              placeholder="Search records..."
               value={search}
               onChange={(event) => setSearch(event.target.value)}
             />
@@ -505,26 +432,28 @@ export default function AdminPage() {
         {tab === "overview" && (
           <>
             <h2 style={styles.heading}>Platform Overview</h2>
-
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-                gap: "14px",
-              }}
-            >
+            <div style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(175px, 1fr))",
+              gap: "14px",
+            }}>
               {[
-                ["TOTAL USERS", data?.stats?.totalUsers ?? 0],
-                ["APPROVED DEPOSITS", money(data?.stats?.totalDeposits)],
-                ["APPROVED DEPOSIT COUNT", data?.stats?.approvedDeposits ?? 0],
-                ["PENDING DEPOSITS", data?.stats?.pendingDeposits ?? 0],
-                ["WITHDRAWAL REQUESTS", data?.stats?.totalWithdrawals ?? 0],
-                ["PENDING WITHDRAWALS", data?.stats?.pendingWithdrawals ?? 0],
-                ["WALLET RECORDS", data?.stats?.totalWallets ?? 0],
+                ["TOTAL USERS", stats.totalUsers],
+                ["APPROVED DEPOSITS", money(stats.totalDeposits)],
+                ["PENDING DEPOSITS", stats.pendingDeposits],
+                ["WITHDRAWAL REQUESTS", stats.totalWithdrawals],
+                ["PENDING WITHDRAWALS", stats.pendingWithdrawals],
+                ["TOTAL WALLET BALANCE", money(stats.totalWalletBalance)],
+                ["ACTIVE PLAN PURCHASES", stats.activePlanPurchases],
+                ["TOTAL PLAN SALES", money(stats.totalPlanSales)],
+                ["ACTIVE PLANS", stats.enabledPlans],
+                ["REALIZED PROFIT", money(stats.totalRealizedProfit)],
+                ["ALLOCATED PROFIT", money(stats.totalAllocatedProfit)],
+                ["PROFIT PERIODS", stats.totalProfitPeriods],
               ].map(([label, value]) => (
                 <div style={styles.card} key={label}>
                   <div style={styles.label}>{label}</div>
-                  <div style={styles.value}>{value}</div>
+                  <div style={styles.value}>{value ?? 0}</div>
                 </div>
               ))}
             </div>
@@ -533,7 +462,6 @@ export default function AdminPage() {
               <h2 style={styles.heading}>Recent Deposits</h2>
               <DataTable
                 rows={deposits.slice(0, 5)}
-                emptyText="Hakuna deposit records."
                 columns={[
                   {
                     label: "User",
@@ -541,19 +469,31 @@ export default function AdminPage() {
                   },
                   {
                     label: "Amount",
-                    render: (row) =>
-                      money(row.actually_paid || row.price_amount || row.amount),
+                    render: (row) => money(row.actually_paid || row.price_amount || row.amount),
                   },
                   { label: "Currency", key: "currency" },
-                  {
-                    label: "Status",
-                    render: (row) => <Status value={row.status} />,
-                  },
-                  {
-                    label: "Date",
-                    render: (row) => dateFormat(row.created_at),
-                  },
+                  { label: "Status", render: (row) => <Status value={row.status} /> },
+                  { label: "Date", render: (row) => dateFormat(row.created_at) },
                 ]}
+                emptyText="Hakuna deposit records."
+              />
+            </section>
+
+            <section style={styles.section}>
+              <h2 style={styles.heading}>Recent Withdrawals</h2>
+              <DataTable
+                rows={withdrawals.slice(0, 5)}
+                columns={[
+                  {
+                    label: "User",
+                    render: (row) => emailByUser[row.user_id] || row.user_id,
+                  },
+                  { label: "Amount", render: (row) => money(row.amount) },
+                  { label: "Currency", key: "currency" },
+                  { label: "Status", render: (row) => <Status value={row.status} /> },
+                  { label: "Date", render: (row) => dateFormat(row.created_at) },
+                ]}
+                emptyText="Hakuna withdrawal requests."
               />
             </section>
           </>
@@ -562,10 +502,6 @@ export default function AdminPage() {
         {tab === "users" && (
           <section>
             <h2 style={styles.heading}>User Management</h2>
-            <p style={{ color: "#9ca89f", fontSize: "13px" }}>
-              Users {filteredUsers.length} / {users.length}. Admin accounts cannot be suspended here.
-            </p>
-
             <DataTable
               rows={filteredUsers}
               emptyText="Hakuna users waliopatikana."
@@ -575,17 +511,12 @@ export default function AdminPage() {
                 { label: "Role", key: "role" },
                 {
                   label: "Account",
-                  render: (row) => (
-                    <Status value={row.is_banned ? "suspended" : "active"} />
-                  ),
+                  render: (row) => <Status value={row.is_banned ? "suspended" : "active"} />,
                 },
-                {
-                  label: "Registered",
-                  render: (row) => dateFormat(row.created_at),
-                },
+                { label: "Registered", render: (row) => dateFormat(row.created_at) },
                 {
                   label: "Action",
-                  render: (row) => (
+                  render: (row) =>
                     row.role === "admin" ? (
                       <span style={{ color: "#d6ad45" }}>Protected Admin</span>
                     ) : (
@@ -601,12 +532,9 @@ export default function AdminPage() {
                       >
                         {busyUser === row.id
                           ? "Please wait..."
-                          : row.is_banned
-                          ? "Reactivate"
-                          : "Suspend"}
+                          : row.is_banned ? "Reactivate" : "Suspend"}
                       </button>
-                    )
-                  ),
+                    ),
                 },
               ]}
             />
@@ -618,24 +546,18 @@ export default function AdminPage() {
             <h2 style={styles.heading}>Wallet Management</h2>
             <DataTable
               rows={filteredWallets}
-              emptyText="Hakuna wallet records."
               columns={[
                 {
                   label: "User",
                   render: (row) => emailByUser[row.user_id] || row.user_id,
                 },
                 { label: "User ID", key: "user_id" },
-                {
-                  label: "Balance",
-                  render: (row) => money(row.balance),
-                },
+                { label: "Balance", render: (row) => money(row.balance) },
                 { label: "Currency", key: "currency" },
                 { label: "Network", key: "network" },
               ]}
+              emptyText="Hakuna wallet records."
             />
-            <p style={{ color: "#9ca89f", fontSize: "12px", marginTop: "12px" }}>
-              Wallet balances are displayed for monitoring. This page does not manually change balances.
-            </p>
           </section>
         )}
 
@@ -644,7 +566,6 @@ export default function AdminPage() {
             <h2 style={styles.heading}>Deposit Management</h2>
             <DataTable
               rows={filteredDeposits}
-              emptyText="Hakuna deposit records."
               columns={[
                 {
                   label: "User",
@@ -652,24 +573,18 @@ export default function AdminPage() {
                 },
                 {
                   label: "Amount",
-                  render: (row) =>
-                    money(row.actually_paid || row.price_amount || row.amount),
+                  render: (row) => money(row.actually_paid || row.price_amount || row.amount),
                 },
                 { label: "Currency", key: "currency" },
                 { label: "Network", key: "network" },
-                {
-                  label: "Status",
-                  render: (row) => <Status value={row.status} />,
-                },
+                { label: "Status", render: (row) => <Status value={row.status} /> },
                 { label: "Payment ID", key: "provider_payment_id" },
-                {
-                  label: "Date",
-                  render: (row) => dateFormat(row.created_at),
-                },
+                { label: "Date", render: (row) => dateFormat(row.created_at) },
               ]}
+              emptyText="Hakuna deposit records."
             />
             <p style={{ color: "#9ca89f", fontSize: "12px", marginTop: "12px" }}>
-              Deposit approval and wallet crediting are controlled by verified NOWPayments notifications.
+              Deposit crediting is controlled by verified NOWPayments notifications.
             </p>
           </section>
         )}
@@ -679,40 +594,32 @@ export default function AdminPage() {
             <h2 style={styles.heading}>Withdrawal Management</h2>
             <DataTable
               rows={filteredWithdrawals}
-              emptyText="Hakuna withdrawal requests."
               columns={[
                 {
                   label: "User",
                   render: (row) => emailByUser[row.user_id] || row.user_id,
                 },
                 { label: "User ID", key: "user_id" },
-                {
-                  label: "Amount",
-                  render: (row) => money(row.amount),
-                },
+                { label: "Amount", render: (row) => money(row.amount) },
                 { label: "Currency", key: "currency" },
-                {
-                  label: "Status",
-                  render: (row) => <Status value={row.status} />,
-                },
-                {
-                  label: "Date",
-                  render: (row) => dateFormat(row.created_at),
-                },
+                { label: "Network", key: "network" },
+                { label: "Wallet Address", key: "wallet_address" },
+                { label: "Status", render: (row) => <Status value={row.status} /> },
+                { label: "Date", render: (row) => dateFormat(row.created_at) },
               ]}
+              emptyText="Hakuna withdrawal requests."
             />
             <p style={{ color: "#9ca89f", fontSize: "12px", marginTop: "12px" }}>
-              Withdrawal requests are currently view-only. Payout approval and sending must be connected to a secure payout workflow before enabling actions.
+              Hapa unaona maombi ya withdrawal. Approval na kutuma malipo bado vinahitaji payout workflow salama.
             </p>
           </section>
         )}
 
         {tab === "transactions" && (
           <section>
-            <h2 style={styles.heading}>Transaction History</h2>
+            <h2 style={styles.heading}>All Transactions</h2>
             <DataTable
               rows={filteredTransactions}
-              emptyText="Hakuna transactions zilizopatikana."
               columns={[
                 { label: "Type", key: "type" },
                 {
@@ -721,37 +628,124 @@ export default function AdminPage() {
                 },
                 {
                   label: "Amount",
-                  render: (row) =>
-                    money(row.actually_paid || row.price_amount || row.amount),
+                  render: (row) => money(row.actually_paid || row.price_amount || row.amount),
                 },
                 { label: "Currency", key: "currency" },
-                {
-                  label: "Status",
-                  render: (row) => <Status value={row.status} />,
-                },
-                {
-                  label: "Transaction Hash",
-                  key: "tx_hash",
-                },
-                {
-                  label: "Date",
-                  render: (row) => dateFormat(row.created_at),
-                },
+                { label: "Network", key: "network" },
+                { label: "Status", render: (row) => <Status value={row.status} /> },
+                { label: "Transaction Hash", key: "tx_hash" },
+                { label: "Date", render: (row) => dateFormat(row.created_at) },
               ]}
+              emptyText="Hakuna transactions."
             />
           </section>
         )}
 
-        <footer
-          style={{
-            marginTop: "40px",
-            borderTop: "1px solid #29352e",
-            paddingTop: "18px",
-            color: "#718078",
-            fontSize: "12px",
-            textAlign: "center",
-          }}
-        >
+        {tab === "plans" && (
+          <section>
+            <h2 style={styles.heading}>Investment Plan Rules</h2>
+            <DataTable
+              rows={filteredPlans}
+              columns={[
+                { label: "Plan", key: "plan_name" },
+                { label: "Price", render: (row) => money(row.price_usdt) },
+                { label: "Profit Weight", key: "profit_weight" },
+                {
+                  label: "Status",
+                  render: (row) => <Status value={row.enabled ? "active" : "disabled"} />,
+                },
+                { label: "Updated", render: (row) => dateFormat(row.updated_at) },
+              ]}
+              emptyText="Hakuna investment plan rules."
+            />
+            <p style={{ color: "#9ca89f", fontSize: "12px", marginTop: "12px" }}>
+              Kwa sasa sehemu hii inaonyesha plan rules zilizopo kwenye database. Haibadilishi bei au profit weight.
+            </p>
+          </section>
+        )}
+
+        {tab === "purchases" && (
+          <section>
+            <h2 style={styles.heading}>Mining Plan Purchases</h2>
+            <DataTable
+              rows={filteredPurchases}
+              columns={[
+                {
+                  label: "User",
+                  render: (row) => emailByUser[row.user_id] || row.user_id,
+                },
+                { label: "Plan", key: "plan_name" },
+                { label: "Price", render: (row) => money(row.price_usdt) },
+                { label: "Currency", key: "currency" },
+                { label: "Network", key: "network" },
+                { label: "Status", render: (row) => <Status value={row.status} /> },
+                { label: "Payment ID", key: "provider_payment_id" },
+                { label: "Purchase Date", render: (row) => dateFormat(row.created_at) },
+                { label: "Activated", render: (row) => dateFormat(row.activated_at) },
+              ]}
+              emptyText="Hakuna plan purchases."
+            />
+          </section>
+        )}
+
+        {tab === "profits" && (
+          <section>
+            <h2 style={styles.heading}>Investment Profit Periods</h2>
+            <DataTable
+              rows={filteredPeriods}
+              columns={[
+                { label: "Period", key: "period_name" },
+                { label: "Source", key: "source" },
+                { label: "Start", key: "start_date" },
+                { label: "End", key: "end_date" },
+                {
+                  label: "Realized Profit",
+                  render: (row) => money(row.realized_profit_usdt),
+                },
+                { label: "Status", render: (row) => <Status value={row.status} /> },
+                { label: "Created", render: (row) => dateFormat(row.created_at) },
+                { label: "Posted", render: (row) => dateFormat(row.posted_at) },
+              ]}
+              emptyText="Hakuna profit periods."
+            />
+            <p style={{ color: "#9ca89f", fontSize: "12px", marginTop: "12px" }}>
+              Profit periods zinaonekana hapa. Kuanzisha, kuidhinisha au kugawa profit bado hakujawashwa kupitia dashboard hii.
+            </p>
+          </section>
+        )}
+
+        {tab === "allocations" && (
+          <section>
+            <h2 style={styles.heading}>Profit Allocations</h2>
+            <DataTable
+              rows={filteredAllocations}
+              columns={[
+                {
+                  label: "User",
+                  render: (row) => emailByUser[row.user_id] || row.user_id,
+                },
+                { label: "Period", key: "period_name" },
+                { label: "Plan", key: "plan_name" },
+                { label: "Source", key: "source" },
+                { label: "Principal", render: (row) => money(row.principal_usdt) },
+                { label: "Plan Weight", key: "plan_weight" },
+                { label: "Allocation Weight", key: "allocation_weight" },
+                { label: "Profit", render: (row) => money(row.profit_usdt) },
+                { label: "Created", render: (row) => dateFormat(row.created_at) },
+              ]}
+              emptyText="Hakuna profit allocations."
+            />
+          </section>
+        )}
+
+        <footer style={{
+          marginTop: "40px",
+          borderTop: "1px solid #29352e",
+          paddingTop: "18px",
+          color: "#718078",
+          fontSize: "12px",
+          textAlign: "center",
+        }}>
           Crypto Mining Hub · Secure Admin Area
         </footer>
       </div>
