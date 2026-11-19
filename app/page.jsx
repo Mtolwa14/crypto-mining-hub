@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -242,6 +243,7 @@ export default function Home() {
     }
   }
 
+  // Plan payment details will be displayed inside the selected plan card.
   async function buyPlan(plan) {
     setBusyAction(plan.name);
     setActionMsg("");
@@ -278,9 +280,6 @@ export default function Home() {
         planName: plan.name,
       });
 
-      setActionMsg(
-        "Payment created. Your plan activates after payment confirmation."
-      );
     } catch (err) {
       setActionMsg(err.message || "Plan purchase failed.");
     } finally {
@@ -619,11 +618,14 @@ export default function Home() {
           grid-template-columns: repeat(2, minmax(0, 1fr));
           gap: 11px;
           margin-top: 15px;
+          align-items: start;
         }
 
         .plan {
           padding: 15px;
           background: #171d17;
+          min-width: 0;
+          scroll-margin-top: 20px;
         }
 
         .planname {
@@ -778,6 +780,8 @@ export default function Home() {
           padding: 14px;
           margin-top: 14px;
           overflow-wrap: anywhere;
+          width: 100%;
+          min-width: 0;
         }
 
         .payvalue {
@@ -908,6 +912,18 @@ export default function Home() {
 
           .plans {
             grid-template-columns: repeat(2, minmax(0, 1fr));
+          }
+
+          .plan {
+            padding: 12px;
+          }
+
+          .plan .paybox {
+            grid-column: auto;
+          }
+
+          .plan .payvalue {
+            font-size: 10px;
           }
         }
       `}</style>
@@ -1109,6 +1125,7 @@ export default function Home() {
                   )}
                 </div>
 
+                {/* PLANS SECTION */}
                 <div className="panel" id="plans">
                   <h2>Investment Plans</h2>
 
@@ -1119,7 +1136,11 @@ export default function Home() {
 
                   <div className="plans">
                     {plans.map((plan) => (
-                      <div className="plan" key={plan.name}>
+                      <div
+                        className="plan"
+                        id={`plan-${plan.name}`}
+                        key={plan.name}
+                      >
                         <div className="planname">{plan.name}</div>
 
                         <div className="price">
@@ -1137,11 +1158,70 @@ export default function Home() {
                             ? "CREATING PAYMENT..."
                             : "BUY PLAN"}
                         </button>
+
+                        {/* PAYMENT DETAILS INSIDE THE SELECTED PLAN */}
+                        {payment?.kind === "plan" &&
+                          payment?.planName === plan.name && (
+                            <div className="paybox">
+                              <strong>{plan.name} PAYMENT DETAILS</strong>
+
+                              <div className="detail">
+                                Send exactly the amount shown below.
+                                Use USDT on BNB Smart Chain (BEP20).
+                              </div>
+
+                              <div className="label">Amount to Send</div>
+
+                              <div className="payvalue">
+                                {payment.pay_amount}{" "}
+                                {payment.pay_currency || "USDT"}
+                              </div>
+
+                              <div className="label">Payment Address</div>
+
+                              <div className="payvalue">
+                                {payment.pay_address || "Address not returned"}
+                              </div>
+
+                              {payment.payment_id && (
+                                <div className="detail">
+                                  Payment ID: {payment.payment_id}
+                                </div>
+                              )}
+
+                              {payment.order_id && (
+                                <div className="detail">
+                                  Order ID: {payment.order_id}
+                                </div>
+                              )}
+
+                              <button
+                                type="button"
+                                className="copybtn"
+                                onClick={() =>
+                                  navigator.clipboard?.writeText(
+                                    payment.pay_address || ""
+                                  )
+                                }
+                              >
+                                Copy Address
+                              </button>
+
+                              <p className="smallnote">
+                                Verify the payment address, amount, and network
+                                before sending. Your plan activates after payment
+                                confirmation.
+                              </p>
+                            </div>
+                          )}
                       </div>
                     ))}
                   </div>
+
+                  {actionMsg && <p className="error">{actionMsg}</p>}
                 </div>
 
+                {/* DEPOSIT SECTION */}
                 <div className="panel" id="deposit">
                   <h2>Make a Deposit</h2>
 
@@ -1171,19 +1251,17 @@ export default function Home() {
                     </button>
                   </form>
 
-                  {actionMsg && <p className="message">{actionMsg}</p>}
+                  {actionMsg && payment?.kind === "deposit" && (
+                    <p className="message">{actionMsg}</p>
+                  )}
 
-                  {payment && (
+                  {/* DEPOSIT DETAILS ONLY */}
+                  {payment?.kind === "deposit" && (
                     <div className="paybox">
-                      <strong>
-                        {payment.kind === "plan"
-                          ? `${payment.planName} Payment`
-                          : "Deposit Payment"}
-                      </strong>
+                      <strong>Deposit Payment Details</strong>
 
                       <div className="detail">
-                        Send exactly the requested amount using the network
-                        shown by the payment provider.
+                        Send exactly the amount displayed below.
                       </div>
 
                       <div className="label">Amount to Send</div>
@@ -1309,7 +1387,7 @@ export default function Home() {
                 </div>
 
                 <div className="panel">
-                  <h2>Profit & Loss</h2>
+                  <h2>Profit &amp; Loss</h2>
 
                   <p className="muted">Verified business results only.</p>
 
