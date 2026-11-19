@@ -1,3 +1,4 @@
+
 import { NextResponse } from "next/server";
 
 const URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -5,8 +6,6 @@ const ANON = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const SERVICE = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 const MIN_WITHDRAWAL = 10;
-const CURRENCY = "USDT";
-const NETWORK = "BEP20";
 
 export async function POST(req) {
   try {
@@ -17,10 +16,9 @@ export async function POST(req) {
       );
     }
 
-    // 1. Verify login
     const auth = req.headers.get("authorization");
 
-    if (!auth || !auth.startsWith("Bearer ")) {
+    if (!auth?.startsWith("Bearer ")) {
       return NextResponse.json(
         { error: "Please login again." },
         { status: 401 }
@@ -45,29 +43,22 @@ export async function POST(req) {
     }
 
     const user = await authRes.json();
-
-    // 2. Read withdrawal details
     const body = await req.json();
 
     const amount = Number(body.amount);
     const wallet = String(body.wallet_address || "").trim();
 
-    // 3. Validate amount
-    if (!Number.isFinite(amount) || amount < MIN_WITHDRAWAL) {
+    if (
+      !Number.isFinite(amount) ||
+      amount < MIN_WITHDRAWAL ||
+      !Number.isSafeInteger(Math.round(amount * 100))
+    ) {
       return NextResponse.json(
-        { error: "Minimum withdrawal is 10 USDT." },
+        { error: "Minimum withdrawal is 10 USDT. Enter a valid amount." },
         { status: 400 }
       );
     }
 
-    if (!Number.isSafeInteger(Math.round(amount * 100))) {
-      return NextResponse.json(
-        { error: "Invalid withdrawal amount." },
-        { status: 400 }
-      );
-    }
-
-    // 4. Validate wallet address
     if (
       wallet.length < 20 ||
       wallet.length > 150 ||
@@ -85,7 +76,7 @@ export async function POST(req) {
       "Content-Type": "application/json",
     };
 
-    // 5. Verify active mining plan
+    // Confirm the user has an active mining plan.
     const planRes = await fetch(
       `${URL}/rest/v1/mining_plan_purchases?user_id=eq.${encodeURIComponent(user.id)}&status=eq.active&select=id&limit=1`,
       {
@@ -96,7 +87,7 @@ export async function POST(req) {
 
     if (!planRes.ok) {
       return NextResponse.json(
-        { error: "Unable to verify active plan." },
+        { error: "Unable to verify active mining plan." },
         { status: 500 }
       );
     }
@@ -110,75 +101,51 @@ export async function POST(req) {
       );
     }
 
-    // 6. Prevent multiple pending requests
-    const pendingRes = await fetch(
-      `${URL}/rest/v1/mining_withdrawals?user_id=eq.${encodeURIComponent(user.id)}&status=eq.Pending%20Review&select=id&limit=1`,
-      {
-        headers,
-        cache: "no-store",
-      }
-    );
-
-    if (!pendingRes.ok) {
-      return NextResponse.json(
-        { error: "Unable to check pending withdrawals." },
-        { status: 500 }
-      );
-    }
-
-    const pending = await pendingRes.json();
-
-    if (pending.length > 0) {
-      return NextResponse.json(
-        {
-          error:
-            "You already have a pending withdrawal. Wait for it to be reviewed.",
-        },
-        { status: 409 }
-      );
-    }
-
-    // 7. Save withdrawal request
-    const saveRes = await fetch(
-      `${URL}/rest/v1/mining_withdrawals`,
+    // Atomically check balance, deduct funds and create withdrawal.
+    const withdrawalRes = await fetch(
+      `${URL}/rest/v1/rpc/create_secure_withdrawal`,
       {
         method: "POST",
-        headers: {
-          ...headers,
-          Prefer: "return=representation",
-        },
+        headers,
+        cache: "no-store",
         body: JSON.stringify({
-          user_id: user.id,
-          amount,
-          currency: CURRENCY,
-          network: NETWORK,
-          wallet_address: wallet,
-          status: "Pending Review",
+          p_user_id: user.id,
+          p_amount: amount,
+          p_wallet_address: wallet,
         }),
       }
     );
 
-    const resultText = await saveRes.text();
+    const resultText = await withdrawalRes.text();
 
-    let result = [];
-
+    let result;
     try {
       result = JSON.parse(resultText);
     } catch {
-      result = [];
+      result = null;
     }
 
-    if (!saveRes.ok) {
+    if (!withdrawalRes.ok) {
+      const message =
+        result?.message ||
+        result?.details ||
+        "Unable to process withdrawal.";
+
+      const status =
+        message.includes("already have a pending") ? 409 :
+        message.includes("Insufficient wallet balance") ? 400 :
+        message.includes("Minimum withdrawal") ? 400 :
+        message.includes("Invalid wallet") ? 400 : 500;
+
       return NextResponse.json(
-        { error: "Unable to submit withdrawal request." },
-        { status: 500 }
+        { error: message },
+        { status }
       );
     }
 
-    // 8. Success
     return NextResponse.json({
       success: true,
-      withdrawal: result?.[0] || null,
+      withdrawal: result,
       message: "Withdrawal submitted successfully. Awaiting admin review.",
     });
   } catch (error) {
