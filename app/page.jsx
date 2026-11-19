@@ -16,6 +16,7 @@ const plans = [
 
 const nav = [
   ["overview", "◈", "Overview"],
+  ["referral", "👥", "Referral / Affiliate"],
   ["investments", "▣", "My Investments"],
   ["plans", "◇", "Investment Plans"],
   ["deposit", "↓", "Deposit"],
@@ -23,7 +24,6 @@ const nav = [
   ["deposits", "↙", "Deposit History"],
   ["withdrawals", "↗", "Withdrawals"],
   ["profit", "％", "Profit & Loss"],
-  ["referral", "👥", "Referral / Affiliate"],
   ["account", "⚙", "Account"],
 ];
 
@@ -92,58 +92,63 @@ export default function Home() {
     setLoading(true);
     setLoadError("");
 
-    const [w, d, p, wr, pr] = await Promise.all([
-      supabase.from("wallets")
-        .select("balance,currency,network")
-        .eq("user_id", user.id)
-        .eq("currency", "USDT")
-        .eq("network", "BEP20")
-        .maybeSingle(),
+    try {
+      const [w, d, p, wr, pr] = await Promise.all([
+        supabase.from("wallets")
+          .select("balance,currency,network")
+          .eq("user_id", user.id)
+          .eq("currency", "USDT")
+          .eq("network", "BEP20")
+          .maybeSingle(),
 
-      supabase.from("transactions")
-        .select("id,type,amount,currency,network,status,price_amount,actually_paid,created_at,provider_payment_id")
-        .eq("user_id", user.id)
-        .eq("type", "deposit")
-        .order("created_at", { ascending: false })
-        .limit(50),
+        supabase.from("transactions")
+          .select("id,type,amount,currency,network,status,price_amount,actually_paid,created_at,provider_payment_id")
+          .eq("user_id", user.id)
+          .eq("type", "deposit")
+          .order("created_at", { ascending: false })
+          .limit(50),
 
-      supabase.from("mining_plan_purchases")
-        .select("id,plan_name,status,principal_usdt,price_usdt,created_at,activated_at")
-        .eq("user_id", user.id)
-        .order("created_at", { ascending: false })
-        .limit(50),
+        supabase.from("mining_plan_purchases")
+          .select("id,plan_name,status,principal_usdt,price_usdt,created_at,activated_at")
+          .eq("user_id", user.id)
+          .order("created_at", { ascending: false })
+          .limit(50),
 
-      supabase.from("mining_withdrawals")
-        .select("id,amount,currency,network,wallet_address,status,created_at")
-        .eq("user_id", user.id)
-        .order("created_at", { ascending: false })
-        .limit(50),
+        supabase.from("mining_withdrawals")
+          .select("id,amount,currency,network,wallet_address,status,created_at")
+          .eq("user_id", user.id)
+          .order("created_at", { ascending: false })
+          .limit(50),
 
-      supabase.from("investment_profit_allocations")
-        .select("id,period_name,source,plan_name,principal_usdt,profit_usdt,created_at")
-        .eq("user_id", user.id)
-        .order("created_at", { ascending: false })
-        .limit(100),
-    ]);
+        supabase.from("investment_profit_allocations")
+          .select("id,period_name,source,plan_name,principal_usdt,profit_usdt,created_at")
+          .eq("user_id", user.id)
+          .order("created_at", { ascending: false })
+          .limit(100),
+      ]);
 
-    const errors = [w.error, d.error, p.error, wr.error, pr.error]
-      .filter(Boolean)
-      .map((e) => e.message);
+      const errors = [w.error, d.error, p.error, wr.error, pr.error]
+        .filter(Boolean)
+        .map((e) => e.message);
 
-    setWallet(w.error ? null : w.data);
-    setDeposits(d.error ? [] : d.data || []);
-    setPurchases(p.error ? [] : p.data || []);
-    setWithdrawals(wr.error ? [] : wr.data || []);
-    setProfits(pr.error ? [] : pr.data || []);
+      setWallet(w.error ? null : w.data);
+      setDeposits(d.error ? [] : d.data || []);
+      setPurchases(p.error ? [] : p.data || []);
+      setWithdrawals(wr.error ? [] : wr.data || []);
+      setProfits(pr.error ? [] : pr.data || []);
 
-    if (errors.length) setLoadError(errors.join(" • "));
-
-    setLoading(false);
+      if (errors.length) setLoadError(errors.join(" • "));
+    } catch (err) {
+      setLoadError(err.message || "Could not load account data.");
+    } finally {
+      setLoading(false);
+    }
   }, [user]);
 
   useEffect(() => {
-    if (user) loadData();
-    else {
+    if (user) {
+      loadData();
+    } else {
       setWallet(null);
       setDeposits([]);
       setPurchases([]);
@@ -336,17 +341,8 @@ export default function Home() {
     (x) => String(x.status).toLowerCase() === "active"
   );
 
-  const pendingPlans = purchases.filter(
-    (x) => String(x.status).toLowerCase() === "pending"
-  );
-
   const activeAmount = activePlans.reduce(
     (sum, x) => sum + Number(x.principal_usdt || x.price_usdt || 0),
-    0
-  );
-
-  const pendingAmount = pendingPlans.reduce(
-    (sum, x) => sum + Number(x.price_usdt || 0),
     0
   );
 
@@ -365,16 +361,18 @@ export default function Home() {
     setReferralLoading(true);
     setReferralError("");
 
-    const { data, error } = await supabase.rpc("get_my_referral_dashboard");
+    try {
+      const { data, error } = await supabase.rpc("get_my_referral_dashboard");
 
-    if (error) {
-      setReferralError(error.message);
-      setReferralData(null);
-    } else {
+      if (error) throw error;
+
       setReferralData(data || null);
+    } catch (err) {
+      setReferralError(err.message || "Could not load referral details.");
+      setReferralData(null);
+    } finally {
+      setReferralLoading(false);
     }
-
-    setReferralLoading(false);
   }
 
   function go(id) {
@@ -393,8 +391,15 @@ export default function Home() {
     });
   }
 
-  function copyAddress(address) {
-    if (address) navigator.clipboard?.writeText(address);
+  async function copyAddress(address) {
+    if (!address) return;
+
+    try {
+      await navigator.clipboard.writeText(address);
+      setActionMsg("Copied successfully.");
+    } catch {
+      setActionMsg("Copy failed. Please copy the text manually.");
+    }
   }
 
   function paymentDetails(pay, title) {
@@ -431,6 +436,133 @@ export default function Home() {
         <p className="smallnote">
           Confirm the address, amount and network before sending. The plan activates after payment confirmation.
         </p>
+      </div>
+    );
+  }
+
+  function referralPanel() {
+    return (
+      <div className="panel referral-panel" id="referral">
+        <div className="panelhead">
+          <div>
+            <div className="eyebrow">INVITE & EARN</div>
+            <h2>Referral / Affiliate Programme</h2>
+            <p className="muted">
+              Invite friends and earn commissions when their Mining Plans are confirmed.
+            </p>
+          </div>
+
+          <button
+            className="secondary"
+            type="button"
+            onClick={loadReferralData}
+            disabled={referralLoading}
+          >
+            {referralLoading ? "Loading..." : "↻ Refresh"}
+          </button>
+        </div>
+
+        {referralError && <p className="error">{referralError}</p>}
+
+        {referralLoading && !referralData ? (
+          <div className="empty">Loading referral details...</div>
+        ) : referralData ? (
+          <>
+            <div className="walletbox">
+              <div className="muted">YOUR REFERRAL CODE</div>
+              <div className="balance" style={{ fontSize: "25px" }}>
+                {referralData.referral_code || "Not available"}
+              </div>
+              <button
+                className="copybtn"
+                type="button"
+                onClick={() => copyAddress(referralData.referral_code)}
+              >
+                COPY CODE
+              </button>
+              <div className="smallnote">
+                Share this code with people you invite.
+              </div>
+            </div>
+
+            <div className="stats referral-stats" style={{ marginTop: "14px" }}>
+              <div className="stat">
+                <div className="statlabel">People Referred</div>
+                <span className="statvalue">
+                  {referralData.referrals_count || 0}
+                </span>
+              </div>
+
+              <div className="stat">
+                <div className="statlabel">Total Commission</div>
+                <span className="statvalue">
+                  {money(referralData.total_commission)} USDT
+                </span>
+              </div>
+            </div>
+
+            <h3>Commission Levels</h3>
+            <div className="list">
+              {[{ level: 1, rate: 10 }, { level: 2, rate: 3 }, { level: 3, rate: 2 }].map((x) => {
+                const row = (referralData.level_totals || []).find(
+                  (v) => Number(v.level) === x.level
+                );
+
+                return (
+                  <div className="item" key={x.level}>
+                    <div className="itemtop">
+                      <span className="itemamount">
+                        Level {x.level} · {x.rate}%
+                      </span>
+                      <span className="badge ok">
+                        {money(row?.total)} USDT
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <h3 style={{ marginTop: "18px" }}>Commission History</h3>
+
+            {(referralData.commissions || []).length === 0 ? (
+              <div className="empty">
+                No referral commissions yet. Commissions appear after a referred user's Mining Plan payment is confirmed.
+              </div>
+            ) : (
+              <div className="list">
+                {referralData.commissions.map((c) => (
+                  <div className="item" key={c.id}>
+                    <div className="itemtop">
+                      <span className="itemamount">
+                        +{money(c.commission_amount)} USDT
+                      </span>
+                      <span className={`badge ${statusClass(c.status)}`}>
+                        {c.status || "pending"}
+                      </span>
+                    </div>
+                    <div className="detail">
+                      Level {c.level} · Rate {c.commission_rate}% · Plan amount {money(c.base_amount)} USDT
+                    </div>
+                    <div className="detail">
+                      Date: {dateText(c.created_at)}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <p className="smallnote">
+              Commissions: Level 1 = 10%, Level 2 = 3%, Level 3 = 2%.
+              Paid only after confirmed Mining Plan purchases.
+              Deposits do not earn referral commission.
+            </p>
+          </>
+        ) : (
+          <div className="empty">
+            Referral details are not available yet. Tap Refresh to try again.
+          </div>
+        )}
       </div>
     );
   }
@@ -510,8 +642,31 @@ export default function Home() {
         .withdrawform{margin-top:15px;padding:16px;border:1px solid #346c43;border-radius:12px;background:#0c160f}
         .authbox{min-height:80vh;display:grid;place-items:center;padding:20px}
         .authpanel{width:100%;max-width:430px;padding:26px}
-        @media(max-width:980px){.stats{grid-template-columns:repeat(2,minmax(0,1fr))}.columns{grid-template-columns:1fr}.layout{grid-template-columns:1fr}.side{display:flex;gap:5px;overflow-x:auto;padding:9px;border-right:0;border-bottom:1px solid #243b29}.side-caption{display:none}.navbtn{flex:0 0 auto;width:auto;margin:0}}
-        @media(max-width:640px){.top{padding:12px}.brand-title{font-size:11px}.logo{width:36px;height:36px}.email{display:none}.main{padding:16px 11px}.panel{padding:14px}.stat{padding:12px}.statvalue{font-size:16px}.plan{padding:11px}.plans{gap:9px}.price{font-size:20px}.navbtn{padding:10px 12px;font-size:10px}}
+        .referral-panel{border:2px solid #39734a;background:linear-gradient(145deg,#14251a,#0e150f);scroll-margin-top:20px}
+        .referral-panel .eyebrow{margin-bottom:8px}
+        .referral-stats{grid-template-columns:repeat(2,minmax(0,1fr))}
+        @media(max-width:980px){
+          .stats{grid-template-columns:repeat(2,minmax(0,1fr))}
+          .columns{grid-template-columns:1fr}
+          .layout{grid-template-columns:1fr}
+          .side{display:flex;gap:5px;overflow-x:auto;padding:9px;border-right:0;border-bottom:1px solid #243b29}
+          .side-caption{display:none}
+          .navbtn{flex:0 0 auto;width:auto;margin:0}
+        }
+        @media(max-width:640px){
+          .top{padding:12px}
+          .brand-title{font-size:11px}
+          .logo{width:36px;height:36px}
+          .email{display:none}
+          .main{padding:16px 11px}
+          .panel{padding:14px}
+          .stat{padding:12px}
+          .statvalue{font-size:16px}
+          .plan{padding:11px}
+          .plans{gap:9px}
+          .price{font-size:20px}
+          .navbtn{padding:10px 12px;font-size:10px}
+        }
       `}</style>
 
       <header className="top">
@@ -636,6 +791,9 @@ export default function Home() {
                 <div className="statnote">Recorded allocations</div>
               </div>
             </div>
+
+            {/* REFERRAL SECTION: visible near the top of dashboard */}
+            {referralPanel()}
 
             {loadError && <p className="error">Data issue: {loadError}</p>}
 
@@ -933,126 +1091,6 @@ export default function Home() {
                           <div className="detail">Recorded: {dateText(p.created_at)}</div>
                         </div>
                       ))}
-                    </div>
-                  )}
-                </div>
-
-                <div className="panel" id="referral">
-                  <div className="panelhead">
-                    <div>
-                      <h2>Referral / Affiliate</h2>
-                      <p className="muted">
-                        Invite friends and earn commissions when their Mining Plans are confirmed.
-                      </p>
-                    </div>
-                    <button
-                      className="secondary"
-                      type="button"
-                      onClick={loadReferralData}
-                      disabled={referralLoading}
-                    >
-                      {referralLoading ? "Loading..." : "↻ Refresh"}
-                    </button>
-                  </div>
-
-                  {referralError && <p className="error">{referralError}</p>}
-
-                  {referralLoading && !referralData ? (
-                    <div className="empty">Loading referral details...</div>
-                  ) : referralData ? (
-                    <>
-                      <div className="walletbox">
-                        <div className="muted">YOUR REFERRAL CODE</div>
-                        <div className="balance" style={{ fontSize: "25px" }}>
-                          {referralData.referral_code || "Not available"}
-                        </div>
-                        <button
-                          className="copybtn"
-                          type="button"
-                          onClick={() => copyAddress(referralData.referral_code)}
-                        >
-                          COPY CODE
-                        </button>
-                        <div className="smallnote">
-                          Share this code with people you invite.
-                        </div>
-                      </div>
-
-                      <div className="stats" style={{ marginTop: "14px" }}>
-                        <div className="stat">
-                          <div className="statlabel">People Referred</div>
-                          <span className="statvalue">
-                            {referralData.referrals_count || 0}
-                          </span>
-                        </div>
-                        <div className="stat">
-                          <div className="statlabel">Total Commission</div>
-                          <span className="statvalue">
-                            {money(referralData.total_commission)} USDT
-                          </span>
-                        </div>
-                      </div>
-
-                      <h3>Commission Levels</h3>
-                      <div className="list">
-                        {[{ level: 1, rate: 10 }, { level: 2, rate: 3 }, { level: 3, rate: 2 }].map((x) => {
-                          const row = (referralData.level_totals || []).find(
-                            (v) => Number(v.level) === x.level
-                          );
-
-                          return (
-                            <div className="item" key={x.level}>
-                              <div className="itemtop">
-                                <span className="itemamount">
-                                  Level {x.level} · {x.rate}%
-                                </span>
-                                <span className="badge ok">
-                                  {money(row?.total)} USDT
-                                </span>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-
-                      <h3 style={{ marginTop: "18px" }}>Commission History</h3>
-
-                      {(referralData.commissions || []).length === 0 ? (
-                        <div className="empty">
-                          No referral commissions yet. Commissions appear after a referred user's Mining Plan payment is confirmed.
-                        </div>
-                      ) : (
-                        <div className="list">
-                          {referralData.commissions.map((c) => (
-                            <div className="item" key={c.id}>
-                              <div className="itemtop">
-                                <span className="itemamount">
-                                  +{money(c.commission_amount)} USDT
-                                </span>
-                                <span className={`badge ${statusClass(c.status)}`}>
-                                  {c.status || "pending"}
-                                </span>
-                              </div>
-                              <div className="detail">
-                                Level {c.level} · Rate {c.commission_rate}% · Plan amount {money(c.base_amount)} USDT
-                              </div>
-                              <div className="detail">
-                                Date: {dateText(c.created_at)}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-
-                      <p className="smallnote">
-                        Commissions: Level 1 = 10%, Level 2 = 3%, Level 3 = 2%.
-                        Paid only after confirmed Mining Plan purchases.
-                        Deposits do not earn referral commission.
-                      </p>
-                    </>
-                  ) : (
-                    <div className="empty">
-                      Referral details are not available yet. Tap Refresh to try again.
                     </div>
                   )}
                 </div>
