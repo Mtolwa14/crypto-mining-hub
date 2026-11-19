@@ -146,6 +146,7 @@ export default function AdminPage() {
   const [search, setSearch] = useState("");
   const [tab, setTab] = useState("overview");
   const [busyUser, setBusyUser] = useState("");
+  const [busyWithdrawal, setBusyWithdrawal] = useState("");
 
   const loadDashboard = useCallback(async () => {
     setError("");
@@ -176,9 +177,7 @@ export default function AdminPage() {
       try {
         result = JSON.parse(raw);
       } catch {
-        throw new Error(
-          `Server haijarudisha JSON. HTTP ${response.status}.`
-        );
+        throw new Error(`Server haijarudisha JSON. HTTP ${response.status}.`);
       }
 
       if (!response.ok) {
@@ -245,6 +244,62 @@ export default function AdminPage() {
       setError(err.message || "Imeshindikana kubadilisha user.");
     } finally {
       setBusyUser("");
+    }
+  }
+
+  async function reviewWithdrawal(withdrawal, decision) {
+    const actionName = decision === "approve" ? "kuidhinisha" : "kukataa";
+
+    const confirmed = window.confirm(
+      `Una uhakika unataka ${actionName} withdrawal ya ${money(withdrawal.amount)}?`
+    );
+
+    if (!confirmed) return;
+
+    setBusyWithdrawal(withdrawal.id);
+    setError("");
+    setMessage("");
+
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData?.session?.access_token;
+
+      if (!token) {
+        router.replace("/");
+        return;
+      }
+
+      const response = await fetch("/api/admin/withdrawals", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          withdrawalId: withdrawal.id,
+          decision,
+        }),
+      });
+
+      const raw = await response.text();
+      let result;
+
+      try {
+        result = JSON.parse(raw);
+      } catch {
+        throw new Error(`Server haijarudisha JSON. HTTP ${response.status}.`);
+      }
+
+      if (!response.ok) {
+        throw new Error(result?.error || "Withdrawal review failed.");
+      }
+
+      setMessage(result.message || "Withdrawal updated.");
+      await loadDashboard();
+    } catch (err) {
+      setError(err.message || "Imeshindikana kuhakiki withdrawal.");
+    } finally {
+      setBusyWithdrawal("");
     }
   }
 
@@ -463,14 +518,8 @@ export default function AdminPage() {
               <DataTable
                 rows={deposits.slice(0, 5)}
                 columns={[
-                  {
-                    label: "User",
-                    render: (row) => emailByUser[row.user_id] || row.user_id,
-                  },
-                  {
-                    label: "Amount",
-                    render: (row) => money(row.actually_paid || row.price_amount || row.amount),
-                  },
+                  { label: "User", render: (row) => emailByUser[row.user_id] || row.user_id },
+                  { label: "Amount", render: (row) => money(row.actually_paid || row.price_amount || row.amount) },
                   { label: "Currency", key: "currency" },
                   { label: "Status", render: (row) => <Status value={row.status} /> },
                   { label: "Date", render: (row) => dateFormat(row.created_at) },
@@ -484,10 +533,7 @@ export default function AdminPage() {
               <DataTable
                 rows={withdrawals.slice(0, 5)}
                 columns={[
-                  {
-                    label: "User",
-                    render: (row) => emailByUser[row.user_id] || row.user_id,
-                  },
+                  { label: "User", render: (row) => emailByUser[row.user_id] || row.user_id },
                   { label: "Amount", render: (row) => money(row.amount) },
                   { label: "Currency", key: "currency" },
                   { label: "Status", render: (row) => <Status value={row.status} /> },
@@ -547,10 +593,7 @@ export default function AdminPage() {
             <DataTable
               rows={filteredWallets}
               columns={[
-                {
-                  label: "User",
-                  render: (row) => emailByUser[row.user_id] || row.user_id,
-                },
+                { label: "User", render: (row) => emailByUser[row.user_id] || row.user_id },
                 { label: "User ID", key: "user_id" },
                 { label: "Balance", render: (row) => money(row.balance) },
                 { label: "Currency", key: "currency" },
@@ -567,14 +610,8 @@ export default function AdminPage() {
             <DataTable
               rows={filteredDeposits}
               columns={[
-                {
-                  label: "User",
-                  render: (row) => emailByUser[row.user_id] || row.user_id,
-                },
-                {
-                  label: "Amount",
-                  render: (row) => money(row.actually_paid || row.price_amount || row.amount),
-                },
+                { label: "User", render: (row) => emailByUser[row.user_id] || row.user_id },
+                { label: "Amount", render: (row) => money(row.actually_paid || row.price_amount || row.amount) },
                 { label: "Currency", key: "currency" },
                 { label: "Network", key: "network" },
                 { label: "Status", render: (row) => <Status value={row.status} /> },
@@ -595,22 +632,53 @@ export default function AdminPage() {
             <DataTable
               rows={filteredWithdrawals}
               columns={[
-                {
-                  label: "User",
-                  render: (row) => emailByUser[row.user_id] || row.user_id,
-                },
+                { label: "User", render: (row) => emailByUser[row.user_id] || row.user_id },
                 { label: "User ID", key: "user_id" },
                 { label: "Amount", render: (row) => money(row.amount) },
                 { label: "Currency", key: "currency" },
                 { label: "Network", key: "network" },
                 { label: "Wallet Address", key: "wallet_address" },
                 { label: "Status", render: (row) => <Status value={row.status} /> },
+                {
+                  label: "Admin Actions",
+                  render: (row) =>
+                    row.status === "Pending Review" ? (
+                      <div style={{ display: "flex", gap: "7px", flexWrap: "wrap" }}>
+                        <button
+                          style={{
+                            ...styles.button,
+                            background: "#28794c",
+                            color: "#fff",
+                            padding: "8px 10px",
+                          }}
+                          disabled={busyWithdrawal === row.id}
+                          onClick={() => reviewWithdrawal(row, "approve")}
+                        >
+                          {busyWithdrawal === row.id ? "Please wait..." : "Approve"}
+                        </button>
+                        <button
+                          style={{
+                            ...styles.button,
+                            background: "#8b2929",
+                            color: "#fff",
+                            padding: "8px 10px",
+                          }}
+                          disabled={busyWithdrawal === row.id}
+                          onClick={() => reviewWithdrawal(row, "reject")}
+                        >
+                          {busyWithdrawal === row.id ? "Please wait..." : "Reject"}
+                        </button>
+                      </div>
+                    ) : (
+                      <span style={{ color: "#9ca89f" }}>Reviewed</span>
+                    ),
+                },
                 { label: "Date", render: (row) => dateFormat(row.created_at) },
               ]}
               emptyText="Hakuna withdrawal requests."
             />
             <p style={{ color: "#9ca89f", fontSize: "12px", marginTop: "12px" }}>
-              Hapa unaona maombi ya withdrawal. Approval na kutuma malipo bado vinahitaji payout workflow salama.
+              Approve huweka ombi kwenye Awaiting Payout; haitumi USDT moja kwa moja. Reject hurudisha kiasi kwenye wallet ya mtumiaji.
             </p>
           </section>
         )}
@@ -622,14 +690,8 @@ export default function AdminPage() {
               rows={filteredTransactions}
               columns={[
                 { label: "Type", key: "type" },
-                {
-                  label: "User",
-                  render: (row) => emailByUser[row.user_id] || row.user_id,
-                },
-                {
-                  label: "Amount",
-                  render: (row) => money(row.actually_paid || row.price_amount || row.amount),
-                },
+                { label: "User", render: (row) => emailByUser[row.user_id] || row.user_id },
+                { label: "Amount", render: (row) => money(row.actually_paid || row.price_amount || row.amount) },
                 { label: "Currency", key: "currency" },
                 { label: "Network", key: "network" },
                 { label: "Status", render: (row) => <Status value={row.status} /> },
@@ -650,16 +712,13 @@ export default function AdminPage() {
                 { label: "Plan", key: "plan_name" },
                 { label: "Price", render: (row) => money(row.price_usdt) },
                 { label: "Profit Weight", key: "profit_weight" },
-                {
-                  label: "Status",
-                  render: (row) => <Status value={row.enabled ? "active" : "disabled"} />,
-                },
+                { label: "Status", render: (row) => <Status value={row.enabled ? "active" : "disabled"} /> },
                 { label: "Updated", render: (row) => dateFormat(row.updated_at) },
               ]}
               emptyText="Hakuna investment plan rules."
             />
             <p style={{ color: "#9ca89f", fontSize: "12px", marginTop: "12px" }}>
-              Kwa sasa sehemu hii inaonyesha plan rules zilizopo kwenye database. Haibadilishi bei au profit weight.
+              Sehemu hii inaonyesha plan rules zilizopo kwenye database.
             </p>
           </section>
         )}
@@ -670,10 +729,7 @@ export default function AdminPage() {
             <DataTable
               rows={filteredPurchases}
               columns={[
-                {
-                  label: "User",
-                  render: (row) => emailByUser[row.user_id] || row.user_id,
-                },
+                { label: "User", render: (row) => emailByUser[row.user_id] || row.user_id },
                 { label: "Plan", key: "plan_name" },
                 { label: "Price", render: (row) => money(row.price_usdt) },
                 { label: "Currency", key: "currency" },
@@ -698,19 +754,13 @@ export default function AdminPage() {
                 { label: "Source", key: "source" },
                 { label: "Start", key: "start_date" },
                 { label: "End", key: "end_date" },
-                {
-                  label: "Realized Profit",
-                  render: (row) => money(row.realized_profit_usdt),
-                },
+                { label: "Realized Profit", render: (row) => money(row.realized_profit_usdt) },
                 { label: "Status", render: (row) => <Status value={row.status} /> },
                 { label: "Created", render: (row) => dateFormat(row.created_at) },
                 { label: "Posted", render: (row) => dateFormat(row.posted_at) },
               ]}
               emptyText="Hakuna profit periods."
             />
-            <p style={{ color: "#9ca89f", fontSize: "12px", marginTop: "12px" }}>
-              Profit periods zinaonekana hapa. Kuanzisha, kuidhinisha au kugawa profit bado hakujawashwa kupitia dashboard hii.
-            </p>
           </section>
         )}
 
@@ -720,10 +770,7 @@ export default function AdminPage() {
             <DataTable
               rows={filteredAllocations}
               columns={[
-                {
-                  label: "User",
-                  render: (row) => emailByUser[row.user_id] || row.user_id,
-                },
+                { label: "User", render: (row) => emailByUser[row.user_id] || row.user_id },
                 { label: "Period", key: "period_name" },
                 { label: "Plan", key: "plan_name" },
                 { label: "Source", key: "source" },
