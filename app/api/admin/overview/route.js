@@ -63,8 +63,13 @@ export async function GET(request) {
     const [
       usersResult,
       depositsResult,
+      transactionsResult,
       withdrawalsResult,
       walletsResult,
+      purchasesResult,
+      planRulesResult,
+      profitPeriodsResult,
+      profitAllocationsResult,
     ] = await Promise.all([
       db.auth.admin.listUsers({ page: 1, perPage: 100 }),
 
@@ -73,48 +78,148 @@ export async function GET(request) {
         .select("*")
         .eq("type", "deposit")
         .order("created_at", { ascending: false })
-        .limit(200),
+        .limit(500),
 
       db
         .from("transactions")
         .select("*")
-        .in("type", ["withdraw", "withdrawal"])
         .order("created_at", { ascending: false })
-        .limit(200),
+        .limit(500),
+
+      db
+        .from("mining_withdrawals")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(500),
 
       db
         .from("wallets")
-        .select("user_id, currency, network, balance")
+        .select("id, user_id, currency, network, balance, created_at")
         .order("balance", { ascending: false })
-        .limit(200),
+        .limit(500),
+
+      db
+        .from("mining_plan_purchases")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(500),
+
+      db
+        .from("investment_plan_rules")
+        .select("*")
+        .order("price_usdt", { ascending: true }),
+
+      db
+        .from("investment_profit_periods")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(500),
+
+      db
+        .from("investment_profit_allocations")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(1000),
     ]);
 
-    if (usersResult.error) throw usersResult.error;
-    if (depositsResult.error) throw depositsResult.error;
-    if (withdrawalsResult.error) throw withdrawalsResult.error;
-    if (walletsResult.error) throw walletsResult.error;
+    const results = [
+      ["Users", usersResult],
+      ["Deposits", depositsResult],
+      ["Transactions", transactionsResult],
+      ["Withdrawals", withdrawalsResult],
+      ["Wallets", walletsResult],
+      ["Plan purchases", purchasesResult],
+      ["Plan rules", planRulesResult],
+      ["Profit periods", profitPeriodsResult],
+      ["Profit allocations", profitAllocationsResult],
+    ];
+
+    for (const [name, result] of results) {
+      if (result.error) {
+        console.error(`${name} query error:`, result.error);
+        throw new Error(`${name}: ${result.error.message}`);
+      }
+    }
 
     const users = usersResult.data.users || [];
     const deposits = depositsResult.data || [];
+    const transactions = transactionsResult.data || [];
     const withdrawals = withdrawalsResult.data || [];
     const wallets = walletsResult.data || [];
+    const planPurchases = purchasesResult.data || [];
+    const planRules = planRulesResult.data || [];
+    const profitPeriods = profitPeriodsResult.data || [];
+    const profitAllocations = profitAllocationsResult.data || [];
 
-    const approvedDeposits = deposits.filter(
-      (item) => item.status === "approved"
+    const isApproved = (status) =>
+      ["approved", "finished", "confirmed", "completed", "paid"].includes(
+        String(status || "").toLowerCase()
+      );
+
+    const isPending = (status) =>
+      ["pending", "waiting", "pending review", "processing"].includes(
+        String(status || "").toLowerCase()
+      );
+
+    const approvedDeposits = deposits.filter((item) =>
+      isApproved(item.status)
+    );
+
+    const pendingDeposits = deposits.filter((item) =>
+      isPending(item.status)
+    );
+
+    const pendingWithdrawals = withdrawals.filter((item) =>
+      isPending(item.status)
+    );
+
+    const activePurchases = planPurchases.filter((item) =>
+      ["active", "approved", "finished", "confirmed", "completed"].includes(
+        String(item.status || "").toLowerCase()
+      )
+    );
+
+    const postedProfitPeriods = profitPeriods.filter((item) =>
+      ["posted", "completed", "closed"].includes(
+        String(item.status || "").toLowerCase()
+      )
     );
 
     const totalDeposits = approvedDeposits.reduce(
       (sum, item) =>
-        sum + Number(item.actually_paid || 0),
+        sum +
+        Number(
+          item.actually_paid ||
+            item.price_amount ||
+            item.amount ||
+            0
+        ),
       0
     );
 
-    const pendingDeposits = deposits.filter(
-      (item) => ["pending", "waiting"].includes(item.status)
+    const totalWithdrawals = withdrawals
+      .filter((item) => isApproved(item.status))
+      .reduce((sum, item) => sum + Number(item.amount || 0), 0);
+
+    const totalWalletBalance = wallets.reduce(
+      (sum, item) => sum + Number(item.balance || 0),
+      0
     );
 
-    const pendingWithdrawals = withdrawals.filter(
-      (item) => ["pending", "waiting"].includes(item.status)
+    const totalPlanSales = activePurchases.reduce(
+      (sum, item) => sum + Number(item.price_usdt || 0),
+      0
+    );
+
+    const totalRealizedProfit = postedProfitPeriods.reduce(
+      (sum, item) =>
+        sum + Number(item.realized_profit_usdt || 0),
+      0
+    );
+
+    const totalAllocatedProfit = profitAllocations.reduce(
+      (sum, item) => sum + Number(item.profit_usdt || 0),
+      0
     );
 
     return NextResponse.json({
@@ -131,16 +236,41 @@ export async function GET(request) {
 
       wallets,
       deposits,
+      transactions,
       withdrawals,
+      planPurchases,
+      planRules,
+      profitPeriods,
+      profitAllocations,
 
       stats: {
         totalUsers: users.length,
+
         totalDeposits,
         approvedDeposits: approvedDeposits.length,
         pendingDeposits: pendingDeposits.length,
+
         totalWithdrawals: withdrawals.length,
+        approvedWithdrawals: withdrawals.filter((item) =>
+          isApproved(item.status)
+        ).length,
         pendingWithdrawals: pendingWithdrawals.length,
+        totalWithdrawalAmount: totalWithdrawals,
+
         totalWallets: wallets.length,
+        totalWalletBalance,
+
+        totalPlanPurchases: planPurchases.length,
+        activePlanPurchases: activePurchases.length,
+        totalPlanSales,
+
+        totalPlans: planRules.length,
+        enabledPlans: planRules.filter((item) => item.enabled === true).length,
+
+        totalProfitPeriods: profitPeriods.length,
+        postedProfitPeriods: postedProfitPeriods.length,
+        totalRealizedProfit,
+        totalAllocatedProfit,
       },
     });
   } catch (error) {
