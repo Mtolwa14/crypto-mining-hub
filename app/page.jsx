@@ -1,7 +1,6 @@
-
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabase";
 
 const plans = [
@@ -12,111 +11,141 @@ const plans = [
   { name: "GOLD", price: 250 },
   { name: "PLATINUM", price: 500 },
   { name: "DIAMOND", price: 1000 },
-  { name: "VIP", price: 2000 }
+  { name: "VIP", price: 2000 },
 ];
+
+const nav = [
+  ["overview", "Overview"],
+  ["investments", "My Investments"],
+  ["plans", "Plans"],
+  ["deposit", "Deposit"],
+  ["wallet", "Wallet"],
+  ["deposits", "Deposit History"],
+  ["withdrawals", "Withdrawals"],
+  ["account", "Account"],
+];
+
+const money = (n) =>
+  Number(n || 0).toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+
+const dateText = (v) => (v ? new Date(v).toLocaleString() : "—");
+
+const statusClass = (s) => {
+  const status = String(s || "").toLowerCase();
+
+  if (["approved", "active", "finished", "paid"].includes(status))
+    return "ok";
+
+  if (["pending", "waiting", "confirming"].includes(status))
+    return "pending";
+
+  return "other";
+};
 
 export default function Home() {
   const [user, setUser] = useState(null);
   const [mode, setMode] = useState("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [authMessage, setAuthMessage] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [authMsg, setAuthMsg] = useState("");
+  const [authBusy, setAuthBusy] = useState(false);
 
+  const [section, setSection] = useState("overview");
   const [wallet, setWallet] = useState(null);
-  const [transactions, setTransactions] = useState([]);
-  const [investments, setInvestments] = useState([]);
+  const [deposits, setDeposits] = useState([]);
+  const [purchases, setPurchases] = useState([]);
 
-  const [walletLoading, setWalletLoading] = useState(false);
-  const [dataLoading, setDataLoading] = useState(false);
-  const [walletError, setWalletError] = useState("");
-  const [investmentError, setInvestmentError] = useState("");
-  const [transactionError, setTransactionError] = useState("");
-  const [activeSection, setActiveSection] = useState("overview");
+  const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState("");
+
+  const [depositAmount, setDepositAmount] = useState("20");
+  const [payment, setPayment] = useState(null);
+  const [busyAction, setBusyAction] = useState("");
+  const [actionMsg, setActionMsg] = useState("");
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
-      setUser(data.session?.user ?? null);
+      setUser(data.session?.user || null);
     });
 
-    const { data: listener } = supabase.auth.onAuthStateChange(
-      (_event, session) => setUser(session?.user ?? null)
-    );
+    const { data: listener } =
+      supabase.auth.onAuthStateChange((_event, session) => {
+        setUser(session?.user || null);
+      });
 
     return () => listener.subscription.unsubscribe();
   }, []);
 
-  const loadDashboard = useCallback(async () => {
+  const loadData = useCallback(async () => {
     if (!user) return;
 
-    setDataLoading(true);
-    setWalletLoading(true);
-    setWalletError("");
-    setInvestmentError("");
-    setTransactionError("");
+    setLoading(true);
+    setLoadError("");
 
-    const [walletResult, transactionResult, investmentResult] =
-      await Promise.all([
-        supabase
-          .from("wallets")
-          .select("balance,currency,network")
-          .eq("user_id", user.id)
-          .eq("currency", "USDT")
-          .eq("network", "BEP20")
-          .maybeSingle(),
+    const [w, d, p] = await Promise.all([
+      supabase
+        .from("wallets")
+        .select("balance,currency,network")
+        .eq("user_id", user.id)
+        .eq("currency", "USDT")
+        .eq("network", "BEP20")
+        .maybeSingle(),
 
-        supabase
-          .from("transactions")
-          .select(
-            "id,type,amount,currency,network,status,price_amount,actually_paid,created_at,provider_payment_id"
-          )
-          .eq("user_id", user.id)
-          .eq("type", "deposit")
-          .order("created_at", { ascending: false })
-          .limit(20),
+      supabase
+        .from("transactions")
+        .select(
+          "id,type,amount,currency,network,status,price_amount,actually_paid,created_at,provider_payment_id"
+        )
+        .eq("user_id", user.id)
+        .eq("type", "deposit")
+        .order("created_at", { ascending: false })
+        .limit(50),
 
-        supabase
-          .from("mining_plan_purchases")
-          .select("id,status,principal_usdt")
-          .eq("user_id", user.id)
-      ]);
+      supabase
+        .from("mining_plan_purchases")
+        .select(
+          "id,plan_name,status,principal_usdt,price_usdt,created_at,activated_at"
+        )
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false })
+        .limit(50),
+    ]);
 
-    if (walletResult.error) {
-      setWalletError(walletResult.error.message);
-    } else {
-      setWallet(walletResult.data);
-    }
+    const errors = [w.error, d.error, p.error]
+      .filter(Boolean)
+      .map((e) => e.message);
 
-    if (transactionResult.error) {
-      setTransactionError(transactionResult.error.message);
-    } else {
-      setTransactions(transactionResult.data || []);
-    }
+    if (w.error) setWallet(null);
+    else setWallet(w.data);
 
-    if (investmentResult.error) {
-      setInvestmentError(investmentResult.error.message);
-    } else {
-      setInvestments(investmentResult.data || []);
-    }
+    if (d.error) setDeposits([]);
+    else setDeposits(d.data || []);
 
-    setWalletLoading(false);
-    setDataLoading(false);
+    if (p.error) setPurchases([]);
+    else setPurchases(p.data || []);
+
+    if (errors.length) setLoadError(errors.join(" • "));
+
+    setLoading(false);
   }, [user]);
 
   useEffect(() => {
     if (user) {
-      loadDashboard();
+      loadData();
     } else {
       setWallet(null);
-      setTransactions([]);
-      setInvestments([]);
+      setDeposits([]);
+      setPurchases([]);
     }
-  }, [user, loadDashboard]);
+  }, [user, loadData]);
 
-  async function handleAuth(e) {
+  async function authSubmit(e) {
     e.preventDefault();
-    setLoading(true);
-    setAuthMessage("");
+    setAuthBusy(true);
+    setAuthMsg("");
 
     try {
       if (mode === "register") {
@@ -124,477 +153,778 @@ export default function Home() {
           email,
           password,
           options: {
-            emailRedirectTo: window.location.origin
-          }
+            emailRedirectTo: window.location.origin,
+          },
         });
 
         if (error) throw error;
 
-        setAuthMessage(
+        setAuthMsg(
           data.session
             ? "Account created successfully."
-            : "Registration successful. Please check your email to confirm your account."
+            : "Account created. Please check your email to confirm."
         );
       } else {
         const { error } = await supabase.auth.signInWithPassword({
           email,
-          password
+          password,
         });
 
         if (error) throw error;
       }
-    } catch (error) {
-      setAuthMessage(error.message || "Authentication failed.");
+    } catch (err) {
+      setAuthMsg(err.message || "Authentication failed.");
     } finally {
-      setLoading(false);
+      setAuthBusy(false);
     }
   }
 
-  async function handleLogout() {
+  async function logout() {
     await supabase.auth.signOut();
     setUser(null);
-    setWallet(null);
-    setTransactions([]);
-    setInvestments([]);
+    setPayment(null);
   }
 
-  function money(value) {
-    return Number(value || 0).toLocaleString("en-US", {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2
+  async function getToken() {
+    const { data, error } = await supabase.auth.getSession();
+
+    if (error || !data.session?.access_token) {
+      throw new Error("Session expired. Please login again.");
+    }
+
+    return data.session.access_token;
+  }
+
+  async function createDeposit(e) {
+    e?.preventDefault();
+
+    setBusyAction("deposit");
+    setActionMsg("");
+    setPayment(null);
+
+    try {
+      const access = await getToken();
+
+      const response = await fetch("/api/deposit", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${access}`,
+        },
+        body: JSON.stringify({
+          amount: Number(depositAmount),
+        }),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          result.error ||
+            result.details ||
+            "Deposit creation failed."
+        );
+      }
+
+      setPayment({
+        ...result,
+        kind: "deposit",
+        amount: Number(depositAmount),
+      });
+
+      setActionMsg(
+        "Payment instructions created. Send only the amount displayed below."
+      );
+    } catch (err) {
+      setActionMsg(err.message || "Deposit request failed.");
+    } finally {
+      setBusyAction("");
+    }
+  }
+
+  async function buyPlan(plan) {
+    setBusyAction(plan.name);
+    setActionMsg("");
+    setPayment(null);
+
+    try {
+      const access = await getToken();
+
+      const response = await fetch("/api/plan-purchase", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${access}`,
+        },
+        body: JSON.stringify({
+          plan_name: plan.name,
+        }),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          result.error ||
+            result.details ||
+            "Plan payment could not be created."
+        );
+      }
+
+      setPayment({
+        ...result,
+        kind: "plan",
+        amount: plan.price,
+        planName: plan.name,
+      });
+
+      setActionMsg(
+        "Payment created. Your plan activates after payment confirmation."
+      );
+    } catch (err) {
+      setActionMsg(err.message || "Plan purchase failed.");
+    } finally {
+      setBusyAction("");
+    }
+  }
+
+  const approvedDeposits = useMemo(
+    () =>
+      deposits.filter((x) =>
+        ["approved", "finished"].includes(
+          String(x.status || "").toLowerCase()
+        )
+      ),
+    [deposits]
+  );
+
+  const depositTotal = approvedDeposits.reduce(
+    (sum, x) => sum + Number(x.actually_paid || x.amount || 0),
+    0
+  );
+
+  const activePlans = purchases.filter(
+    (x) => String(x.status).toLowerCase() === "active"
+  );
+
+  const pendingPlans = purchases.filter(
+    (x) => String(x.status).toLowerCase() === "pending"
+  );
+
+  const activeAmount = activePlans.reduce(
+    (sum, x) =>
+      sum + Number(x.principal_usdt || x.price_usdt || 0),
+    0
+  );
+
+  const pendingAmount = pendingPlans.reduce(
+    (sum, x) => sum + Number(x.price_usdt || 0),
+    0
+  );
+
+  function go(id) {
+    setSection(id);
+    setPayment(null);
+    setActionMsg("");
+
+    document.getElementById(id)?.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
     });
   }
 
-  function formatDate(value) {
-    if (!value) return "Date unavailable";
-    return new Date(value).toLocaleString();
-  }
-
-  function statusClass(status) {
-    const value = String(status || "").toLowerCase();
-
-    if (["active", "approved", "paid", "finished"].includes(value)) {
-      return "approved";
-    }
-
-    if (["pending", "waiting", "confirming"].includes(value)) {
-      return "pending";
-    }
-
-    return "other";
-  }
-
-  const confirmedDeposits = transactions
-    .filter((item) => item.status === "approved")
-    .reduce(
-      (sum, item) =>
-        sum + Number(item.actually_paid || item.amount || 0),
-      0
-    );
-
-  const activeInvestments = investments.filter(
-    (item) => item.status === "active"
-  );
-
-  const pendingInvestments = investments.filter(
-    (item) => item.status === "pending"
-  );
-
-  const activeCapital = activeInvestments.reduce(
-    (sum, item) => sum + Number(item.principal_usdt || 0),
-    0
-  );
-
-  const pendingCapital = pendingInvestments.reduce(
-    (sum, item) => sum + Number(item.principal_usdt || 0),
-    0
-  );
-
-  const navigation = [
-    ["overview", "▦", "Overview"],
-    ["investments", "◈", "My Investments"],
-    ["plans", "▤", "Investment Plans"],
-    ["wallet", "◇", "My Wallet"],
-    ["deposits", "↓", "Deposit History"],
-    ["withdrawals", "↑", "Withdrawals"],
-    ["account", "⚙", "Account"]
-  ];
-
   return (
-    <main className="app">
+    <main className="cmh">
       <style jsx global>{`
-        * { box-sizing: border-box; }
-        html { scroll-behavior: smooth; }
+        * {
+          box-sizing: border-box;
+        }
+
         body {
           margin: 0;
           background: #080b0a;
           color: #f4f4ef;
           font-family: Arial, Helvetica, sans-serif;
         }
-        button, input { font: inherit; }
-        button { cursor: pointer; }
-        .app {
+
+        button,
+        input {
+          font: inherit;
+        }
+
+        button {
+          cursor: pointer;
+        }
+
+        .cmh {
           min-height: 100vh;
           background:
-            radial-gradient(circle at 80% 0%, rgba(196,155,54,.10), transparent 28%),
+            radial-gradient(
+              circle at 85% 0,
+              rgba(194, 155, 54, 0.1),
+              transparent 30%
+            ),
             #080b0a;
         }
-        .topbar {
-          min-height: 76px;
-          padding: 14px 5%;
+
+        .top {
+          min-height: 70px;
+          padding: 13px 4%;
           display: flex;
-          align-items: center;
           justify-content: space-between;
-          gap: 15px;
+          align-items: center;
+          gap: 12px;
           border-bottom: 1px solid #292d25;
           background: #0b0f0c;
         }
-        .brand { display: flex; align-items: center; gap: 12px; }
-        .brand-icon {
-          width: 43px;
-          height: 43px;
+
+        .brand {
+          display: flex;
+          gap: 11px;
+          align-items: center;
+        }
+
+        .logo {
+          width: 42px;
+          height: 42px;
           display: grid;
           place-items: center;
           border-radius: 12px;
-          color: #10120c;
-          background: linear-gradient(135deg,#f4d27b,#bd8b28);
-          font-size: 23px;
+          background: linear-gradient(135deg, #f4d27b, #bd8b28);
+          color: #14140d;
           font-weight: 900;
+          font-size: 22px;
         }
-        .brand-name {
+
+        .brand-title {
+          font-weight: 900;
           color: #f0c45b;
-          font-size: 16px;
-          font-weight: 900;
-          letter-spacing: 1px;
+          letter-spacing: 0.8px;
+          font-size: 14px;
         }
-        .brand-tagline { color: #899087; font-size: 11px; margin-top: 4px; }
-        .top-actions { display: flex; align-items: center; gap: 12px; }
-        .user-email { color: #aab0a7; font-size: 12px; }
-        .logout {
-          padding: 10px 15px;
+
+        .tagline {
+          font-size: 10px;
+          color: #879086;
+          margin-top: 4px;
+        }
+
+        .topright {
+          display: flex;
+          gap: 12px;
+          align-items: center;
+        }
+
+        .email {
+          font-size: 11px;
+          color: #aab0a7;
+          max-width: 200px;
+          overflow-wrap: anywhere;
+        }
+
+        .logout,
+        .secondary {
+          padding: 9px 13px;
           border: 1px solid #4b4230;
-          border-radius: 9px;
-          color: #f0c45b;
+          border-radius: 8px;
+          color: #efc45b;
           background: #171711;
         }
+
         .layout {
           display: grid;
-          grid-template-columns: 225px minmax(0,1fr);
-          max-width: 1550px;
+          grid-template-columns: 220px minmax(0, 1fr);
+          max-width: 1500px;
           margin: auto;
-          min-height: calc(100vh - 76px);
+          min-height: calc(100vh - 70px);
         }
-        .sidebar {
-          padding: 27px 16px;
+
+        .side {
+          padding: 23px 14px;
           border-right: 1px solid #252a24;
-          background: rgba(12,16,13,.8);
+          background: #0c100d;
         }
-        .side-label {
-          margin: 8px 12px 15px;
-          color: #70796f;
+
+        .side-caption {
           font-size: 10px;
-          font-weight: bold;
-          letter-spacing: 1.5px;
+          color: #71796f;
+          letter-spacing: 1.4px;
+          margin: 8px 10px 14px;
         }
-        .nav-link {
-          display: flex;
-          align-items: center;
-          gap: 11px;
+
+        .navbtn {
           width: 100%;
-          padding: 13px 14px;
-          margin-bottom: 7px;
+          display: flex;
+          text-align: left;
+          gap: 10px;
+          padding: 12px;
           border: 0;
           border-radius: 9px;
-          color: #b5bcb1;
           background: transparent;
-          text-align: left;
-          font-size: 13px;
+          color: #b5bcb1;
+          font-size: 12px;
+          margin: 4px 0;
         }
-        .nav-link:hover, .nav-link.active {
+
+        .navbtn.active,
+        .navbtn:hover {
           color: #f2cb68;
           background: #242115;
         }
-        .main-content { min-width: 0; padding: 34px 4%; }
-        .welcome-row {
+
+        .main {
+          padding: 30px 4%;
+          min-width: 0;
+        }
+
+        .welcome {
           display: flex;
           justify-content: space-between;
           align-items: center;
           flex-wrap: wrap;
-          gap: 15px;
-          margin-bottom: 26px;
-        }
-        .eyebrow {
-          color: #d7ad4c;
-          font-size: 11px;
-          letter-spacing: 2px;
-          font-weight: bold;
-        }
-        .page-title {
-          margin: 9px 0;
-          font-size: clamp(25px,4vw,35px);
-          color: #f4f2e9;
-        }
-        .muted { color: #899087; font-size: 13px; line-height: 1.7; }
-        .status-pill {
-          padding: 9px 13px;
-          border: 1px solid #28523a;
-          border-radius: 30px;
-          background: #10251a;
-          color: #6edb91;
-          font-size: 11px;
-          font-weight: bold;
-        }
-        .stats-grid {
-          display: grid;
-          grid-template-columns: repeat(4,minmax(0,1fr));
           gap: 14px;
           margin-bottom: 22px;
         }
-        .stat-card {
-          min-width: 0;
-          padding: 20px;
-          border: 1px solid #292d25;
-          border-radius: 14px;
-          background: linear-gradient(145deg,#171b16,#101410);
+
+        .eyebrow {
+          font-size: 10px;
+          letter-spacing: 2px;
+          color: #d7ad4c;
+          font-weight: bold;
         }
-        .stat-icon { font-size: 21px; margin-bottom: 15px; }
-        .stat-label { color: #929a8f; font-size: 12px; }
-        .stat-value {
+
+        .h1 {
+          font-size: clamp(24px, 4vw, 34px);
+          margin: 8px 0;
+          color: #f3f1e8;
+        }
+
+        .muted {
+          font-size: 12px;
+          color: #899087;
+          line-height: 1.65;
+        }
+
+        .connected {
+          border: 1px solid #28523a;
+          background: #10251a;
+          color: #70dc92;
+          border-radius: 30px;
+          padding: 8px 12px;
+          font-size: 10px;
+          font-weight: bold;
+        }
+
+        .stats {
+          display: grid;
+          grid-template-columns: repeat(4, minmax(0, 1fr));
+          gap: 12px;
+          margin-bottom: 18px;
+        }
+
+        .stat,
+        .panel,
+        .plan {
+          border: 1px solid #292d25;
+          border-radius: 13px;
+          background: #131813;
+        }
+
+        .stat {
+          padding: 16px;
+          min-width: 0;
+        }
+
+        .statlabel {
+          color: #929a8f;
+          font-size: 11px;
+        }
+
+        .statvalue {
           display: block;
-          margin-top: 9px;
+          margin-top: 8px;
           color: #f0c45b;
-          font-size: 21px;
-          font-weight: 800;
+          font-weight: 900;
+          font-size: 19px;
           overflow-wrap: anywhere;
         }
-        .stat-note { margin-top: 8px; color: #6e786e; font-size: 10px; }
-        .content-grid {
+
+        .statnote {
+          margin-top: 7px;
+          font-size: 10px;
+          color: #6e786e;
+        }
+
+        .columns {
           display: grid;
-          grid-template-columns: minmax(0,1.4fr) minmax(260px,.8fr);
-          gap: 18px;
+          grid-template-columns: minmax(0, 1.4fr) minmax(250px, 0.8fr);
+          gap: 16px;
           align-items: start;
         }
+
         .panel {
+          padding: 19px;
+          margin-bottom: 16px;
           min-width: 0;
-          padding: 22px;
-          margin-bottom: 18px;
-          border: 1px solid #292d25;
-          border-radius: 14px;
-          background: #121712;
         }
-        .panel h2 { margin: 0 0 7px; color: #f0c45b; font-size: 17px; }
-        .panel h3 { color: #e9e9df; font-size: 14px; }
-        .section-heading {
+
+        .panel h2 {
+          font-size: 16px;
+          color: #f0c45b;
+          margin: 0 0 7px;
+        }
+
+        .panel h3 {
+          font-size: 13px;
+          color: #eee;
+          margin: 0 0 8px;
+        }
+
+        .panelhead {
           display: flex;
           justify-content: space-between;
           align-items: center;
+          gap: 12px;
           flex-wrap: wrap;
-          gap: 10px;
-          margin-bottom: 17px;
+          margin-bottom: 14px;
         }
-        .wallet-box {
-          padding: 20px;
-          margin-top: 17px;
+
+        .walletbox {
+          margin-top: 13px;
+          padding: 19px;
           border: 1px solid #4a3d20;
-          border-radius: 12px;
-          background: linear-gradient(130deg,#292316,#151810);
+          border-radius: 11px;
+          background: linear-gradient(130deg, #292316, #151810);
         }
-        .wallet-balance {
-          margin: 10px 0;
-          color: #f3cf71;
-          font-size: clamp(27px,5vw,37px);
+
+        .balance {
+          font-size: clamp(25px, 5vw, 35px);
           font-weight: 900;
+          color: #f3cf71;
+          margin: 10px 0;
           overflow-wrap: anywhere;
         }
-        .network-tag {
+
+        .network {
           display: inline-block;
           padding: 7px 10px;
           border-radius: 7px;
           color: #7de09a;
           background: #173021;
-          font-size: 11px;
+          font-size: 10px;
         }
-        .plan-grid {
+
+        .plans {
           display: grid;
-          grid-template-columns: repeat(2,minmax(0,1fr));
-          gap: 12px;
-          margin-top: 17px;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 11px;
+          margin-top: 15px;
         }
-        .plan-card {
-          padding: 17px;
-          border: 1px solid #39372b;
-          border-radius: 11px;
+
+        .plan {
+          padding: 15px;
           background: #171d17;
         }
-        .plan-name {
+
+        .planname {
           color: #d9bd70;
           font-size: 11px;
           font-weight: 900;
           letter-spacing: 1px;
         }
-        .plan-price {
-          margin: 9px 0;
+
+        .price {
+          margin: 8px 0;
           color: #f4d27b;
-          font-size: 24px;
+          font-size: 23px;
           font-weight: 900;
         }
-        .plan-description { color: #899087; font-size: 11px; line-height: 1.6; }
-        .feature-card {
-          padding: 17px;
-          margin-top: 13px;
-          border: 1px solid #30372e;
-          border-radius: 11px;
-          background: #171d17;
-        }
-        .feature-title { color: #e7c66e; font-weight: bold; font-size: 12px; }
-        .feature-status { margin-top: 8px; color: #8e988c; font-size: 12px; line-height: 1.7; }
-        .history-list { display: grid; gap: 11px; margin-top: 14px; }
-        .history-item {
-          padding: 15px;
-          border: 1px solid #30372e;
-          border-radius: 10px;
-          background: #171d17;
-          min-width: 0;
-        }
-        .history-top {
-          display: flex;
-          justify-content: space-between;
-          align-items: flex-start;
-          gap: 10px;
-          flex-wrap: wrap;
-        }
-        .history-amount { color: #f0c45b; font-size: 16px; font-weight: 800; }
-        .history-detail {
-          margin-top: 7px;
+
+        .planhint {
           color: #899087;
-          font-size: 11px;
-          line-height: 1.7;
-          overflow-wrap: anywhere;
-        }
-        .history-status {
-          display: inline-block;
-          padding: 6px 9px;
-          border-radius: 20px;
           font-size: 10px;
-          font-weight: bold;
+          margin-bottom: 12px;
         }
-        .history-status.approved {
-          color: #73db91;
-          background: #173021;
-          border: 1px solid #28523a;
-        }
-        .history-status.pending {
-          color: #f0c45b;
-          background: #292316;
-          border: 1px solid #4b4230;
-        }
-        .history-status.other {
-          color: #c0c5bb;
-          background: #252a24;
-          border: 1px solid #394239;
-        }
-        .empty-history {
-          padding: 24px 12px;
-          text-align: center;
-          color: #899087;
-          font-size: 12px;
-          border: 1px dashed #394239;
-          border-radius: 10px;
-        }
-        .refresh-btn {
-          padding: 9px 13px;
-          border: 1px solid #4b4230;
-          border-radius: 8px;
-          color: #f0c45b;
-          background: #1c1b13;
+
+        .label {
+          display: block;
+          margin: 14px 0 7px;
+          color: #b8bdb3;
           font-size: 11px;
         }
-        .error { margin-top: 12px; color: #ff8585; font-size: 12px; overflow-wrap: anywhere; }
-        .footer { padding: 25px 10px; color: #687166; text-align: center; font-size: 11px; }
-        .auth-wrap { min-height: calc(100vh - 76px); display: grid; place-items: center; padding: 25px; }
-        .auth-card {
-          width: 100%;
-          max-width: 430px;
-          padding: 30px;
-          border: 1px solid #393322;
-          border-radius: 17px;
-          background: linear-gradient(145deg,#1a1d16,#101510);
-        }
-        .auth-card h1 { color: #f0c45b; font-size: 27px; }
-        .form-label { display: block; margin: 17px 0 8px; color: #b8bdb3; font-size: 12px; }
+
         .field {
           display: block;
           width: 100%;
-          padding: 14px;
+          padding: 13px;
           border: 1px solid #394239;
           border-radius: 9px;
           outline: none;
           background: #090e0a;
           color: white;
         }
-        .field:focus { border-color: #d8ae4e; }
-        .primary-btn {
+
+        .field:focus {
+          border-color: #d8ae4e;
+        }
+
+        .primary {
           display: block;
           width: 100%;
-          padding: 14px;
-          margin-top: 14px;
+          padding: 13px;
+          margin-top: 12px;
           border: none;
           border-radius: 9px;
           color: #11130d;
-          background: linear-gradient(135deg,#f3d47f,#c39636);
+          background: linear-gradient(135deg, #f3d47f, #c39636);
           font-weight: 900;
         }
-        .primary-btn:disabled { opacity: .5; cursor: not-allowed; }
-        .auth-switch { border: none; background: none; color: #f0c45b; font-weight: bold; }
-        @media (max-width: 1000px) {
-          .stats-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
-          .content-grid { grid-template-columns: 1fr; }
+
+        .primary:disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
         }
-        @media (max-width: 650px) {
-          .topbar { padding: 13px 16px; }
-          .brand-name { font-size: 12px; }
-          .brand-tagline { font-size: 10px; }
-          .brand-icon { width: 37px; height: 37px; }
-          .user-email { display: none; }
-          .layout { display: block; }
-          .sidebar {
+
+        .list {
+          display: grid;
+          gap: 10px;
+          margin-top: 13px;
+        }
+
+        .item {
+          padding: 14px;
+          border: 1px solid #30372e;
+          border-radius: 10px;
+          background: #171d17;
+          min-width: 0;
+        }
+
+        .itemtop {
+          display: flex;
+          justify-content: space-between;
+          align-items: flex-start;
+          gap: 10px;
+          flex-wrap: wrap;
+        }
+
+        .itemamount {
+          color: #f0c45b;
+          font-size: 14px;
+          font-weight: 800;
+          overflow-wrap: anywhere;
+        }
+
+        .detail {
+          margin-top: 7px;
+          color: #899087;
+          font-size: 10px;
+          line-height: 1.7;
+          overflow-wrap: anywhere;
+        }
+
+        .badge {
+          display: inline-block;
+          padding: 6px 9px;
+          border-radius: 20px;
+          font-size: 10px;
+          font-weight: bold;
+        }
+
+        .badge.ok {
+          color: #73db91;
+          background: #173021;
+          border: 1px solid #28523a;
+        }
+
+        .badge.pending {
+          color: #f0c45b;
+          background: #292316;
+          border: 1px solid #4b4230;
+        }
+
+        .badge.other {
+          color: #c0c5bb;
+          background: #252a24;
+          border: 1px solid #394239;
+        }
+
+        .empty {
+          border: 1px dashed #394239;
+          border-radius: 9px;
+          padding: 22px;
+          text-align: center;
+          color: #899087;
+          font-size: 11px;
+        }
+
+        .message {
+          font-size: 12px;
+          color: #8bd6a0;
+          margin-top: 10px;
+          overflow-wrap: anywhere;
+        }
+
+        .error {
+          font-size: 12px;
+          color: #ff8585;
+          margin-top: 10px;
+          overflow-wrap: anywhere;
+        }
+
+        .paybox {
+          border: 1px solid #80672c;
+          background: #211d13;
+          border-radius: 10px;
+          padding: 14px;
+          margin-top: 14px;
+          overflow-wrap: anywhere;
+        }
+
+        .payvalue {
+          word-break: break-all;
+          background: #090e0a;
+          padding: 10px;
+          border-radius: 7px;
+          margin-top: 7px;
+          font-size: 11px;
+          color: #f3d27b;
+        }
+
+        .copybtn {
+          border: 1px solid #4b4230;
+          border-radius: 7px;
+          background: #171711;
+          color: #f0c45b;
+          padding: 8px 10px;
+          margin-top: 8px;
+          font-size: 11px;
+        }
+
+        .smallnote {
+          font-size: 10px;
+          color: #899087;
+          line-height: 1.6;
+          margin-top: 10px;
+        }
+
+        .footer {
+          text-align: center;
+          color: #687166;
+          font-size: 10px;
+          padding: 20px;
+        }
+
+        .withdrawnote {
+          padding: 14px;
+          border: 1px solid #3a3d30;
+          border-radius: 10px;
+          background: #171d17;
+          color: #aab0a7;
+          font-size: 12px;
+          line-height: 1.65;
+        }
+
+        .authbox {
+          min-height: 80vh;
+          display: grid;
+          place-items: center;
+          padding: 20px;
+        }
+
+        .authpanel {
+          width: 100%;
+          max-width: 430px;
+          padding: 26px;
+        }
+
+        @media (max-width: 980px) {
+          .stats {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+          }
+
+          .columns {
+            grid-template-columns: 1fr;
+          }
+        }
+
+        @media (max-width: 640px) {
+          .top {
+            padding: 12px;
+          }
+
+          .brand-title {
+            font-size: 11px;
+          }
+
+          .logo {
+            width: 36px;
+            height: 36px;
+          }
+
+          .email {
+            display: none;
+          }
+
+          .layout {
+            display: block;
+          }
+
+          .side {
             display: flex;
-            gap: 5px;
+            gap: 4px;
             overflow-x: auto;
-            padding: 10px 12px;
-            border-right: none;
+            padding: 8px;
+            border-right: 0;
             border-bottom: 1px solid #252a24;
           }
-          .side-label { display: none; }
-          .nav-link {
+
+          .side-caption {
+            display: none;
+          }
+
+          .navbtn {
             flex: 0 0 auto;
             width: auto;
             margin: 0;
-            padding: 11px 13px;
-            font-size: 11px;
+            padding: 10px;
+            font-size: 10px;
           }
-          .main-content { padding: 24px 14px; }
-          .stat-card { padding: 15px; }
-          .stat-value { font-size: 18px; }
-          .panel { padding: 17px; }
-          .plan-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
-          .auth-card { padding: 23px; }
+
+          .main {
+            padding: 20px 12px;
+          }
+
+          .stat {
+            padding: 13px;
+          }
+
+          .statvalue {
+            font-size: 16px;
+          }
+
+          .panel {
+            padding: 15px;
+          }
+
+          .plans {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+          }
         }
       `}</style>
 
-      <header className="topbar">
+      <header className="top">
         <div className="brand">
-          <div className="brand-icon">₿</div>
+          <div className="logo">₿</div>
           <div>
-            <div className="brand-name">CRYPTO MINING HUB</div>
-            <div className="brand-tagline">Real Business. Transparent Investments.</div>
+            <div className="brand-title">CRYPTO MINING HUB</div>
+            <div className="tagline">Transparent account dashboard</div>
           </div>
         </div>
 
         {user && (
-          <div className="top-actions">
-            <span className="user-email">{user.email}</span>
-            <button className="logout" onClick={handleLogout}>
+          <div className="topright">
+            <span className="email">{user.email}</span>
+            <button className="logout" onClick={logout}>
               Logout
             </button>
           </div>
@@ -602,58 +932,60 @@ export default function Home() {
       </header>
 
       {!user ? (
-        <section className="auth-wrap">
-          <div className="auth-card">
+        <section className="authbox">
+          <div className="panel authpanel">
             <div className="eyebrow">CRYPTO MINING HUB</div>
-            <h1>{mode === "login" ? "Welcome Back" : "Create Account"}</h1>
+
+            <h1 className="h1">
+              {mode === "login" ? "Welcome Back" : "Create Account"}
+            </h1>
+
             <p className="muted">
               {mode === "login"
-                ? "Login to access your investment dashboard."
-                : "Create your investment platform account."}
+                ? "Sign in to view your account."
+                : "Register for your account."}
             </p>
 
-            <form onSubmit={handleAuth}>
-              <label className="form-label">Email Address</label>
+            <form onSubmit={authSubmit}>
+              <label className="label">Email</label>
               <input
                 className="field"
                 type="email"
-                placeholder="Enter your email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
+                placeholder="Email address"
               />
 
-              <label className="form-label">Password</label>
+              <label className="label">Password</label>
               <input
                 className="field"
                 type="password"
-                placeholder="Minimum 6 characters"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 minLength={6}
                 required
+                placeholder="Password"
               />
 
-              <button className="primary-btn" type="submit" disabled={loading}>
-                {loading
+              <button className="primary" disabled={authBusy}>
+                {authBusy
                   ? "PLEASE WAIT..."
                   : mode === "login"
-                    ? "LOGIN TO ACCOUNT"
+                    ? "LOGIN"
                     : "CREATE ACCOUNT"}
               </button>
             </form>
 
-            {authMessage && <p className="muted">{authMessage}</p>}
+            {authMsg && <p className="muted">{authMsg}</p>}
 
-            <p className="muted" style={{ marginTop: 22 }}>
-              {mode === "login"
-                ? "Don't have an account?"
-                : "Already have an account?"}{" "}
+            <p className="muted" style={{ marginTop: 16 }}>
+              {mode === "login" ? "New here?" : "Already registered?"}{" "}
               <button
-                className="auth-switch"
+                className="copybtn"
                 onClick={() => {
                   setMode(mode === "login" ? "register" : "login");
-                  setAuthMessage("");
+                  setAuthMsg("");
                 }}
               >
                 {mode === "login" ? "Register" : "Login"}
@@ -663,210 +995,270 @@ export default function Home() {
         </section>
       ) : (
         <div className="layout">
-          <aside className="sidebar">
-            <div className="side-label">INVESTOR MENU</div>
-            {navigation.map(([id, icon, label]) => (
+          <aside className="side">
+            <div className="side-caption">ACCOUNT MENU</div>
+
+            {nav.map(([id, label]) => (
               <button
                 key={id}
-                className={`nav-link ${activeSection === id ? "active" : ""}`}
-                onClick={() => {
-                  setActiveSection(id);
-                  document.getElementById(id)?.scrollIntoView({
-                    behavior: "smooth",
-                    block: "start"
-                  });
-                }}
+                className={`navbtn ${section === id ? "active" : ""}`}
+                onClick={() => go(id)}
               >
-                <span>{icon}</span>
                 {label}
               </button>
             ))}
           </aside>
 
-          <section className="main-content">
-            <div className="welcome-row" id="overview">
+          <section className="main">
+            <div className="welcome" id="overview">
               <div>
-                <div className="eyebrow">INVESTOR ACCOUNT</div>
-                <h1 className="page-title">Investment Dashboard</h1>
+                <div className="eyebrow">ACCOUNT OVERVIEW</div>
+                <h1 className="h1">Your Dashboard</h1>
                 <p className="muted">
-                  Welcome back. Monitor your account and investment activity.
+                  Welcome back. Review your account activity and payment records.
                 </p>
               </div>
-              <div className="status-pill">● ACCOUNT CONNECTED</div>
+
+              <span className="connected">● SIGNED IN</span>
             </div>
 
-            <div className="stats-grid">
-              <div className="stat-card">
-                <div className="stat-icon">💰</div>
-                <div className="stat-label">Wallet Balance</div>
-                <div className="stat-value">
-                  {walletLoading ? "..." : `${money(wallet?.balance)} USDT`}
-                </div>
-                <div className="stat-note">USDT · BEP20</div>
+            <div className="stats">
+              <div className="stat">
+                <div className="statlabel">Wallet Balance</div>
+                <span className="statvalue">
+                  {loading ? "Loading..." : `${money(wallet?.balance)} USDT`}
+                </span>
+                <div className="statnote">USDT · BEP20</div>
               </div>
 
-              <div className="stat-card">
-                <div className="stat-icon">📥</div>
-                <div className="stat-label">Confirmed Deposits</div>
-                <div className="stat-value">
-                  {money(confirmedDeposits)} USDT
-                </div>
-                <div className="stat-note">Approved deposits only</div>
+              <div className="stat">
+                <div className="statlabel">Confirmed Deposits</div>
+                <span className="statvalue">{money(depositTotal)} USDT</span>
+                <div className="statnote">Approved/finished deposits</div>
               </div>
 
-              <div className="stat-card">
-                <div className="stat-icon">📊</div>
-                <div className="stat-label">Active Investment</div>
-                <div className="stat-value">
-                  {money(activeCapital)} USDT
-                </div>
-                <div className="stat-note">
-                  {activeInvestments.length} active record(s)
+              <div className="stat">
+                <div className="statlabel">Active Plans</div>
+                <span className="statvalue">{activePlans.length}</span>
+                <div className="statnote">
+                  {money(activeAmount)} USDT recorded
                 </div>
               </div>
 
-              <div className="stat-card">
-                <div className="stat-icon">⏳</div>
-                <div className="stat-label">Pending Investment</div>
-                <div className="stat-value">
-                  {money(pendingCapital)} USDT
-                </div>
-                <div className="stat-note">
-                  {pendingInvestments.length} pending record(s)
+              <div className="stat">
+                <div className="statlabel">Pending Plans</div>
+                <span className="statvalue">{pendingPlans.length}</span>
+                <div className="statnote">
+                  {money(pendingAmount)} USDT pending
                 </div>
               </div>
             </div>
 
-            {walletError && <p className="error">Wallet: {walletError}</p>}
-            {investmentError && (
-              <p className="error">
-                Investment records: {investmentError}
-              </p>
-            )}
+            {loadError && <p className="error">Data issue: {loadError}</p>}
 
-            <div className="content-grid">
+            <div className="columns">
               <div>
                 <div className="panel" id="investments">
-                  <div className="section-heading">
+                  <div className="panelhead">
                     <div>
                       <h2>My Investments</h2>
                       <p className="muted">
-                        Your investment records and their current status.
+                        Your plan purchase records and their current status.
                       </p>
                     </div>
+
                     <button
-                      className="refresh-btn"
-                      onClick={loadDashboard}
-                      disabled={dataLoading}
+                      className="secondary"
+                      onClick={loadData}
+                      disabled={loading}
                     >
-                      {dataLoading ? "LOADING..." : "↻ REFRESH"}
+                      {loading ? "Loading..." : "↻ Refresh"}
                     </button>
                   </div>
 
-                  {dataLoading && investments.length === 0 ? (
-                    <p className="muted">Loading investment records...</p>
-                  ) : investments.length === 0 ? (
-                    <div className="empty-history">
-                      No investment records found. Your confirmed investment
-                      records will appear here.
+                  {purchases.length === 0 ? (
+                    <div className="empty">
+                      No investment records found.
                     </div>
                   ) : (
-                    <div className="history-list">
-                      {investments.map((item) => (
-                        <div className="history-item" key={item.id}>
-                          <div className="history-top">
-                            <div>
-                              <div className="history-amount">
-                                {money(item.principal_usdt)} USDT
-                              </div>
-                              <div className="history-detail">
-                                Investment record
-                              </div>
+                    <div className="list">
+                      {purchases.map((p) => (
+                        <div className="item" key={p.id}>
+                          <div className="itemtop">
+                            <div className="itemamount">
+                              {p.plan_name || "Plan"} · $
+                              {money(p.price_usdt || p.principal_usdt)}
                             </div>
+
                             <span
-                              className={`history-status ${statusClass(item.status)}`}
+                              className={`badge ${statusClass(p.status)}`}
                             >
-                              {item.status || "Pending"}
+                              {p.status || "Unknown"}
                             </span>
+                          </div>
+
+                          <div className="detail">
+                            Created: {dateText(p.created_at)}
+                            {p.activated_at
+                              ? ` · Activated: ${dateText(p.activated_at)}`
+                              : ""}
                           </div>
                         </div>
                       ))}
                     </div>
                   )}
-
-                  <p className="muted" style={{ marginTop: 15 }}>
-                    Only verified and activated investment records are counted
-                    as active capital.
-                  </p>
                 </div>
 
                 <div className="panel" id="plans">
                   <h2>Investment Plans</h2>
+
                   <p className="muted">
-                    Available plan levels. Selecting a plan does not create an
-                    investment or charge your account.
+                    Plan payment uses USDT on BEP20. Payment must be confirmed
+                    before a plan is activated.
                   </p>
 
-                  <div className="plan-grid">
+                  <div className="plans">
                     {plans.map((plan) => (
-                      <div className="plan-card" key={plan.name}>
-                        <div className="plan-name">{plan.name}</div>
-                        <div className="plan-price">
+                      <div className="plan" key={plan.name}>
+                        <div className="planname">{plan.name}</div>
+
+                        <div className="price">
                           ${plan.price.toLocaleString("en-US")}
                         </div>
-                        <div className="plan-description">
-                          Investment tier · USDT
-                        </div>
+
+                        <div className="planhint">USDT · BEP20</div>
+
+                        <button
+                          className="primary"
+                          onClick={() => buyPlan(plan)}
+                          disabled={!!busyAction}
+                        >
+                          {busyAction === plan.name
+                            ? "CREATING PAYMENT..."
+                            : "BUY PLAN"}
+                        </button>
                       </div>
                     ))}
                   </div>
                 </div>
 
-                <div className="panel" id="deposits">
-                  <div className="section-heading">
-                    <div>
-                      <h2>Deposit History</h2>
-                      <p className="muted">
-                        Your latest deposit records.
+                <div className="panel" id="deposit">
+                  <h2>Make a Deposit</h2>
+
+                  <p className="muted">
+                    Deposit payment is currently configured for USDT on BNB
+                    Smart Chain (BEP20).
+                  </p>
+
+                  <form onSubmit={createDeposit}>
+                    <label className="label">Deposit Amount (USD)</label>
+
+                    <input
+                      className="field"
+                      type="number"
+                      min="1"
+                      max="10000"
+                      step="0.01"
+                      value={depositAmount}
+                      onChange={(e) => setDepositAmount(e.target.value)}
+                      required
+                    />
+
+                    <button className="primary" disabled={!!busyAction}>
+                      {busyAction === "deposit"
+                        ? "CREATING PAYMENT..."
+                        : "CREATE DEPOSIT PAYMENT"}
+                    </button>
+                  </form>
+
+                  {actionMsg && <p className="message">{actionMsg}</p>}
+
+                  {payment && (
+                    <div className="paybox">
+                      <strong>
+                        {payment.kind === "plan"
+                          ? `${payment.planName} Payment`
+                          : "Deposit Payment"}
+                      </strong>
+
+                      <div className="detail">
+                        Send exactly the requested amount using the network
+                        shown by the payment provider.
+                      </div>
+
+                      <div className="label">Amount to Send</div>
+
+                      <div className="payvalue">
+                        {payment.pay_amount} {payment.pay_currency || "USDT"}
+                      </div>
+
+                      <div className="label">Payment Address</div>
+
+                      <div className="payvalue">
+                        {payment.pay_address || "Address not returned"}
+                      </div>
+
+                      {payment.payment_id && (
+                        <div className="detail">
+                          Payment ID: {payment.payment_id}
+                        </div>
+                      )}
+
+                      {payment.order_id && (
+                        <div className="detail">
+                          Order ID: {payment.order_id}
+                        </div>
+                      )}
+
+                      <button
+                        type="button"
+                        className="copybtn"
+                        onClick={() =>
+                          navigator.clipboard?.writeText(
+                            payment.pay_address || ""
+                          )
+                        }
+                      >
+                        Copy Address
+                      </button>
+
+                      <p className="smallnote">
+                        Verify the address, amount, and network before sending.
+                        Wait for payment confirmation.
                       </p>
                     </div>
-                  </div>
-
-                  {transactionError && (
-                    <p className="error">{transactionError}</p>
                   )}
+                </div>
 
-                  {transactions.length === 0 ? (
-                    <div className="empty-history">
-                      No deposit records found.
-                    </div>
+                <div className="panel" id="deposits">
+                  <h2>Deposit History</h2>
+
+                  {deposits.length === 0 ? (
+                    <div className="empty">No deposit records found.</div>
                   ) : (
-                    <div className="history-list">
-                      {transactions.map((item) => (
-                        <div className="history-item" key={item.id}>
-                          <div className="history-top">
-                            <div>
-                              <div className="history-amount">
-                                {item.price_amount != null
-                                  ? `$${money(item.price_amount)} USD`
-                                  : `${money(item.amount)} ${item.currency || "USDT"}`}
-                              </div>
-                              <div className="history-detail">
-                                {formatDate(item.created_at)}
-                              </div>
-                            </div>
+                    <div className="list">
+                      {deposits.map((d) => (
+                        <div className="item" key={d.id}>
+                          <div className="itemtop">
+                            <span className="itemamount">
+                              ${money(d.price_amount ?? d.amount)}
+                            </span>
+
                             <span
-                              className={`history-status ${statusClass(item.status)}`}
+                              className={`badge ${statusClass(d.status)}`}
                             >
-                              {item.status || "Pending"}
+                              {d.status || "Pending"}
                             </span>
                           </div>
-                          <div className="history-detail">
-                            Network: {item.network || "Not specified"}
+
+                          <div className="detail">
+                            {d.currency || "USDT"} · {d.network || "Network not set"} ·{" "}
+                            {dateText(d.created_at)}
                           </div>
-                          {item.provider_payment_id && (
-                            <div className="history-detail">
-                              Payment ID: {item.provider_payment_id}
+
+                          {d.provider_payment_id && (
+                            <div className="detail">
+                              Payment ID: {d.provider_payment_id}
                             </div>
                           )}
                         </div>
@@ -879,70 +1271,81 @@ export default function Home() {
               <div>
                 <div className="panel" id="wallet">
                   <h2>My Wallet</h2>
+
                   <p className="muted">
-                    Your account wallet balance.
+                    Balance for your USDT BEP20 wallet.
                   </p>
 
-                  <div className="wallet-box">
+                  <div className="walletbox">
                     <div className="muted">AVAILABLE BALANCE</div>
-                    <div className="wallet-balance">
-                      {walletLoading
+
+                    <div className="balance">
+                      {loading
                         ? "Loading..."
                         : `${money(wallet?.balance)} USDT`}
                     </div>
-                    <span className="network-tag">
-                      ● BNB Smart Chain · BEP20
+
+                    <span className="network">
+                      BNB Smart Chain · BEP20
                     </span>
                   </div>
 
-                  {!walletLoading && !wallet && !walletError && (
-                    <p className="muted">
-                      No wallet record was found for this account.
-                    </p>
+                  {!wallet && !loading && (
+                    <p className="muted">Wallet record not found.</p>
                   )}
                 </div>
 
                 <div className="panel" id="withdrawals">
                   <h2>Withdrawals</h2>
-                  <p className="muted">
-                    Review withdrawal service information.
-                  </p>
-                  <div className="feature-card">
-                    <div className="feature-title">USDT · BEP20</div>
-                    <div className="feature-status">
-                      Withdrawal requests and approval workflow will be
-                      connected after the wallet and compliance checks are
-                      completed.
-                    </div>
+
+                  <p className="muted">Withdrawal network: USDT BEP20.</p>
+
+                  <div className="withdrawnote">
+                    Withdrawal is not enabled yet. The server must first
+                    validate available funds, reserve the balance, prevent
+                    duplicate requests, and track approval before funds
+                    can be sent.
                   </div>
                 </div>
 
                 <div className="panel">
                   <h2>Profit & Loss</h2>
-                  <p className="muted">
-                    Investment performance summary.
-                  </p>
-                  <div className="feature-card">
-                    <div className="feature-title">VERIFIED PERFORMANCE</div>
-                    <div className="feature-status">
-                      No verified profit or loss figures are currently
-                      available. This section will display actual recorded
-                      business results when connected.
-                    </div>
+
+                  <p className="muted">Verified business results only.</p>
+
+                  <div className="withdrawnote">
+                    No verified profit or loss data is connected yet.
+                    Actual recorded results will be shown when available.
+                    No projected or guaranteed earnings are displayed.
                   </div>
                 </div>
 
                 <div className="panel" id="account">
-                  <h2>Account Information</h2>
-                  <p className="muted">Signed in as:</p>
-                  <p style={{ overflowWrap: "anywhere" }}>{user.email}</p>
-                  <span className="network-tag">● Supabase Account</span>
+                  <h2>Account</h2>
+
+                  <p className="muted">Signed in email</p>
+
+                  <div style={{ overflowWrap: "anywhere", margin: "12px 0" }}>
+                    {user.email}
+                  </div>
+
+                  <span className="network">
+                    Supabase authenticated account
+                  </span>
+
+                  <button
+                    className="secondary"
+                    style={{ marginTop: 14 }}
+                    onClick={logout}
+                  >
+                    Sign Out
+                  </button>
                 </div>
               </div>
             </div>
 
             <footer className="footer">
-              © {new Date().getFullYear()} Crypto Mining Hub. All rights reserved.
+              © {new Date().getFullYear()} Crypto Mining Hub
             </footer>
           </section>
         </div>
