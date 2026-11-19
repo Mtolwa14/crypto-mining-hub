@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -37,7 +36,7 @@ const dateText = (v) => (v ? new Date(v).toLocaleString() : "—");
 const statusClass = (s) => {
   const status = String(s || "").toLowerCase();
   if (["approved", "active", "finished", "paid"].includes(status)) return "ok";
-  if (["pending", "waiting", "confirming"].includes(status) ) return "pending";
+  if (["pending", "waiting", "confirming", "pending review"].includes(status)) return "pending";
   return "other";
 };
 
@@ -53,6 +52,8 @@ export default function Home() {
   const [wallet, setWallet] = useState(null);
   const [deposits, setDeposits] = useState([]);
   const [purchases, setPurchases] = useState([]);
+  const [withdrawals, setWithdrawals] = useState([]);
+
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState("");
   const [depositAmount, setDepositAmount] = useState("20");
@@ -60,22 +61,31 @@ export default function Home() {
   const [busyAction, setBusyAction] = useState("");
   const [actionMsg, setActionMsg] = useState("");
 
+  const [withdrawOpen, setWithdrawOpen] = useState(false);
+  const [withdrawAmount, setWithdrawAmount] = useState("10");
+  const [withdrawAddress, setWithdrawAddress] = useState("");
+  const [withdrawMsg, setWithdrawMsg] = useState("");
+  const [withdrawError, setWithdrawError] = useState("");
+
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
       setUser(data.session?.user || null);
     });
+
     const { data: listener } = supabase.auth.onAuthStateChange(
       (_event, session) => setUser(session?.user || null)
     );
+
     return () => listener.subscription.unsubscribe();
   }, []);
 
   const loadData = useCallback(async () => {
     if (!user) return;
+
     setLoading(true);
     setLoadError("");
 
-    const [w, d, p] = await Promise.all([
+    const [w, d, p, wr] = await Promise.all([
       supabase.from("wallets")
         .select("balance,currency,network")
         .eq("user_id", user.id)
@@ -95,13 +105,25 @@ export default function Home() {
         .eq("user_id", user.id)
         .order("created_at", { ascending: false })
         .limit(50),
+
+      supabase.from("mining_withdrawals")
+        .select("id,amount,currency,network,wallet_address,status,created_at")
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false })
+        .limit(50),
     ]);
 
-    const errors = [w.error, d.error, p.error].filter(Boolean).map((e) => e.message);
+    const errors = [w.error, d.error, p.error, wr.error]
+      .filter(Boolean)
+      .map((e) => e.message);
+
     setWallet(w.error ? null : w.data);
     setDeposits(d.error ? [] : d.data || []);
     setPurchases(p.error ? [] : p.data || []);
+    setWithdrawals(wr.error ? [] : wr.data || []);
+
     if (errors.length) setLoadError(errors.join(" • "));
+
     setLoading(false);
   }, [user]);
 
@@ -111,6 +133,7 @@ export default function Home() {
       setWallet(null);
       setDeposits([]);
       setPurchases([]);
+      setWithdrawals([]);
     }
   }, [user, loadData]);
 
@@ -118,6 +141,7 @@ export default function Home() {
     e.preventDefault();
     setAuthBusy(true);
     setAuthMsg("");
+
     try {
       if (mode === "register") {
         const { data, error } = await supabase.auth.signUp({
@@ -125,12 +149,18 @@ export default function Home() {
           password,
           options: { emailRedirectTo: window.location.origin },
         });
+
         if (error) throw error;
+
         setAuthMsg(data.session
           ? "Account created successfully."
           : "Account created. Please check your email to confirm.");
       } else {
-        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        const { error } = await supabase.auth.signInWithPassword({
+          email,
+          password,
+        });
+
         if (error) throw error;
       }
     } catch (err) {
@@ -148,8 +178,11 @@ export default function Home() {
 
   async function getToken() {
     const { data, error } = await supabase.auth.getSession();
-    if (error || !data.session?.access_token)
+
+    if (error || !data.session?.access_token) {
       throw new Error("Session expired. Please login again.");
+    }
+
     return data.session.access_token;
   }
 
@@ -158,8 +191,10 @@ export default function Home() {
     setBusyAction("deposit");
     setActionMsg("");
     setPayment(null);
+
     try {
       const access = await getToken();
+
       const response = await fetch("/api/deposit", {
         method: "POST",
         headers: {
@@ -168,9 +203,13 @@ export default function Home() {
         },
         body: JSON.stringify({ amount: Number(depositAmount) }),
       });
+
       const result = await response.json();
-      if (!response.ok)
+
+      if (!response.ok) {
         throw new Error(result.error || result.details || "Deposit creation failed.");
+      }
+
       setPayment({ ...result, kind: "deposit", amount: Number(depositAmount) });
       setActionMsg("Payment instructions created. Send only the amount displayed below.");
     } catch (err) {
@@ -184,8 +223,10 @@ export default function Home() {
     setBusyAction(plan.name);
     setActionMsg("");
     setPayment(null);
+
     try {
       const access = await getToken();
+
       const response = await fetch("/api/plan-purchase", {
         method: "POST",
         headers: {
@@ -194,12 +235,73 @@ export default function Home() {
         },
         body: JSON.stringify({ plan_name: plan.name }),
       });
+
       const result = await response.json();
-      if (!response.ok)
+
+      if (!response.ok) {
         throw new Error(result.error || result.details || "Plan payment could not be created.");
+      }
+
       setPayment({ ...result, kind: "plan", amount: plan.price, planName: plan.name });
     } catch (err) {
       setActionMsg(err.message || "Plan purchase failed.");
+    } finally {
+      setBusyAction("");
+    }
+  }
+
+  async function submitWithdrawal(e) {
+    e.preventDefault();
+
+    setBusyAction("withdraw");
+    setWithdrawMsg("");
+    setWithdrawError("");
+
+    try {
+      const amount = Number(withdrawAmount);
+      const balance = Number(wallet?.balance || 0);
+      const address = withdrawAddress.trim();
+
+      if (!Number.isFinite(amount) || amount < 10) {
+        throw new Error("Minimum withdrawal is 10 USDT.");
+      }
+
+      if (amount > balance) {
+        throw new Error("Insufficient displayed wallet balance.");
+      }
+
+      if (address.length < 20 || address.length > 150) {
+        throw new Error("Enter a valid USDT BEP20 wallet address.");
+      }
+
+      const access = await getToken();
+
+      const response = await fetch("/api/mining-withdrawal", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${access}`,
+        },
+        body: JSON.stringify({
+          amount,
+          wallet_address: address,
+        }),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error || "Withdrawal request failed.");
+      }
+
+      setWithdrawMsg(result.message || "Withdrawal request submitted for review.");
+      setWithdrawOpen(false);
+      setWithdrawAmount("10");
+      setWithdrawAddress("");
+
+      await loadData();
+    } catch (err) {
+      setWithdrawError(err.message || "Withdrawal request failed.");
     } finally {
       setBusyAction("");
     }
@@ -213,46 +315,73 @@ export default function Home() {
   );
 
   const depositTotal = approvedDeposits.reduce(
-    (sum, x) => sum + Number(x.actually_paid || x.amount || 0), 0
+    (sum, x) => sum + Number(x.actually_paid || x.amount || 0),
+    0
   );
 
-  const activePlans = purchases.filter((x) => String(x.status).toLowerCase() === "active");
-  const pendingPlans = purchases.filter((x) => String(x.status).toLowerCase() === "pending");
+  const activePlans = purchases.filter(
+    (x) => String(x.status).toLowerCase() === "active"
+  );
+
+  const pendingPlans = purchases.filter(
+    (x) => String(x.status).toLowerCase() === "pending"
+  );
 
   const activeAmount = activePlans.reduce(
-    (sum, x) => sum + Number(x.principal_usdt || x.price_usdt || 0), 0
+    (sum, x) => sum + Number(x.principal_usdt || x.price_usdt || 0),
+    0
   );
+
   const pendingAmount = pendingPlans.reduce(
-    (sum, x) => sum + Number(x.price_usdt || 0), 0
+    (sum, x) => sum + Number(x.price_usdt || 0),
+    0
   );
 
   function go(id) {
     setSection(id);
     setPayment(null);
     setActionMsg("");
-    document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    document.getElementById(id)?.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
+    });
   }
 
   function copyAddress(address) {
-    if (!address) return;
-    navigator.clipboard?.writeText(address);
+    if (address) navigator.clipboard?.writeText(address);
   }
 
   function paymentDetails(pay, title) {
     if (!pay) return null;
+
     return (
       <div className="paybox">
         <div className="paytitle">{title}</div>
-        <p className="detail">Send the exact amount using USDT on BNB Smart Chain (BEP20).</p>
+        <p className="detail">
+          Send the exact amount using USDT on BNB Smart Chain (BEP20).
+        </p>
+
         <div className="label">Amount to Send</div>
-        <div className="payvalue">{pay.pay_amount} {pay.pay_currency || "USDT"}</div>
+        <div className="payvalue">
+          {pay.pay_amount} {pay.pay_currency || "USDT"}
+        </div>
+
         <div className="label">Payment Address</div>
-        <div className="payvalue">{pay.pay_address || "Address not returned"}</div>
+        <div className="payvalue">
+          {pay.pay_address || "Address not returned"}
+        </div>
+
         {pay.payment_id && <div className="detail">Payment ID: {pay.payment_id}</div>}
         {pay.order_id && <div className="detail">Order ID: {pay.order_id}</div>}
-        <button type="button" className="copybtn" onClick={() => copyAddress(pay.pay_address)}>
+
+        <button
+          type="button"
+          className="copybtn"
+          onClick={() => copyAddress(pay.pay_address)}
+        >
           COPY ADDRESS
         </button>
+
         <p className="smallnote">
           Confirm the address, amount and network before sending. The plan activates after payment confirmation.
         </p>
@@ -265,11 +394,12 @@ export default function Home() {
       <style jsx global>{`
         *{box-sizing:border-box}
         body{margin:0;background:#070b08;color:#eff5ef;font-family:Inter,Arial,sans-serif}
-        button,input{font:inherit}button{cursor:pointer}
+        button,input{font:inherit}
+        button{cursor:pointer}
         .cmh{min-height:100vh;background:radial-gradient(ellipse at 90% 0,rgba(20,120,65,.2),transparent 34%),radial-gradient(ellipse at 5% 15%,rgba(184,143,48,.08),transparent 28%),#070b08;color:#eff5ef}
         .top{background:rgba(8,14,10,.96);border-bottom:1px solid #253b2a;min-height:78px;padding:16px 3%;display:flex;justify-content:space-between;align-items:center;gap:12px}
         .brand{display:flex;gap:11px;align-items:center}
-        .logo{width:42px;height:42px;display:grid;place-items:center;border-radius:12px;background:linear-gradient(140deg,#b7f2c8,#3ba66c);color:#07120a;font-weight:900;font-size:22px;box-shadow:0 4px 20px #29a45a35}
+        .logo{width:42px;height:42px;display:grid;place-items:center;border-radius:12px;background:linear-gradient(140deg,#b7f2c8,#3ba66c);color:#07120a;font-weight:900;font-size:22px}
         .brand-title{font-weight:900;color:#d9f5e1;letter-spacing:1.1px;font-size:14px}
         .tagline{font-size:10px;color:#809684;margin-top:4px}
         .topright{display:flex;gap:12px;align-items:center}
@@ -278,20 +408,19 @@ export default function Home() {
         .layout{display:grid;grid-template-columns:245px minmax(0,1fr);max-width:1600px;margin:auto;min-height:calc(100vh - 78px)}
         .side{padding:25px 15px;border-right:1px solid #243b29;background:#090f0b}
         .side-caption{font-size:10px;color:#66806b;letter-spacing:1.8px;margin:8px 10px 14px}
-        .navbtn{width:100%;display:flex;text-align:left;gap:11px;align-items:center;padding:13px;border:1px solid transparent;border-radius:12px;background:transparent;color:#a2b6a5;font-size:12px;margin:4px 0;transition:all .2s}
+        .navbtn{width:100%;display:flex;text-align:left;gap:11px;align-items:center;padding:13px;border:1px solid transparent;border-radius:12px;background:transparent;color:#a2b6a5;font-size:12px;margin:4px 0}
         .navicon{width:22px;text-align:center;font-size:16px}
         .navbtn:hover{background:#14271a;color:#e0f5e5}
         .navbtn.active{background:linear-gradient(100deg,#173d27,#122117);border-color:#315c3c;color:#a8edbf;box-shadow:inset 3px 0 #4fc27e}
         .main{padding:32px clamp(16px,3vw,48px);min-width:0}
         .welcome{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:14px;margin-bottom:26px}
         .eyebrow{font-size:10px;letter-spacing:2px;color:#70d797;font-weight:bold}
-        .h1{font-size:clamp(24px,4vw,34px);margin:8px 0;color:#f3f8f3;font-weight:800;letter-spacing:-.7px}
+        .h1{font-size:clamp(24px,4vw,34px);margin:8px 0;color:#f3f8f3;font-weight:800}
         .muted{font-size:12px;color:#8fa391;line-height:1.65}
         .connected{border:1px solid #28613b;background:#102a1a;color:#83dfa3;border-radius:30px;padding:8px 12px;font-size:10px;font-weight:bold}
         .stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin-bottom:22px}
         .stat,.panel,.plan{background:linear-gradient(145deg,#141e16,#0e150f);border:1px solid #293d2d;border-radius:16px;box-shadow:0 8px 25px #0002}
-        .stat{padding:19px;min-width:0;transition:all .2s}
-        .stat:hover,.plan:hover{border-color:#438354;transform:translateY(-2px)}
+        .stat{padding:19px;min-width:0}
         .statlabel{color:#91a495;font-size:11px}
         .statvalue{display:block;margin-top:8px;color:#b8edca;font-weight:900;font-size:clamp(16px,2vw,23px);overflow-wrap:anywhere}
         .statnote{margin-top:7px;font-size:10px;color:#6d8672}
@@ -304,15 +433,14 @@ export default function Home() {
         .balance{font-size:clamp(25px,5vw,35px);font-weight:900;color:#d3f4dc;margin:10px 0;overflow-wrap:anywhere}
         .network{display:inline-block;padding:7px 10px;border-radius:8px;color:#91e9ae;background:#173624;border:1px solid #2c6240;font-size:10px}
         .plans{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:15px;align-items:start}
-        .plan{padding:16px;background:linear-gradient(145deg,#17231a,#101711);min-width:0;scroll-margin-top:20px;transition:all .2s}
+        .plan{padding:16px;background:linear-gradient(145deg,#17231a,#101711);min-width:0}
         .planname{color:#91e5ad;font-size:11px;font-weight:900;letter-spacing:1.4px}
         .price{margin:8px 0;color:#e1f1e4;font-size:23px;font-weight:900}
         .planhint{color:#839786;font-size:10px;margin-bottom:12px}
         .label{display:block;margin:14px 0 7px;color:#b8bdb3;font-size:11px}
         .field{display:block;width:100%;padding:13px;border:1px solid #35513a;border-radius:10px;outline:none;background:#080e09;color:white}
         .field:focus{border-color:#68cf8d}
-        .primary{display:block;width:100%;padding:13px;margin-top:12px;border:none;border-radius:10px;color:#07130a;background:linear-gradient(135deg,#a8edbe,#40ac72);font-weight:900;box-shadow:0 4px 15px #2b9d5a22;transition:filter .2s}
-        .primary:hover:not(:disabled){filter:brightness(1.08)}
+        .primary{display:block;width:100%;padding:13px;margin-top:12px;border:none;border-radius:10px;color:#07130a;background:linear-gradient(135deg,#a8edbe,#40ac72);font-weight:900}
         .primary:disabled{opacity:.58;cursor:not-allowed}
         .list{display:grid;gap:10px;margin-top:13px}
         .item{padding:14px;border:1px solid #2b3e30;border-radius:12px;background:#111a13;min-width:0}
@@ -333,6 +461,7 @@ export default function Home() {
         .smallnote{font-size:10px;color:#899087;line-height:1.6;margin-top:10px}
         .footer{text-align:center;color:#58705d;font-size:10px;padding:20px}
         .withdrawnote{padding:14px;border:1px solid #2b3e30;border-radius:10px;background:#111a13;color:#a3b4a5;font-size:12px;line-height:1.65}
+        .withdrawform{margin-top:15px;padding:16px;border:1px solid #346c43;border-radius:12px;background:#0c160f}
         .authbox{min-height:80vh;display:grid;place-items:center;padding:20px}
         .authpanel{width:100%;max-width:430px;padding:26px}
         @media(max-width:980px){.stats{grid-template-columns:repeat(2,minmax(0,1fr))}.columns{grid-template-columns:1fr}.layout{grid-template-columns:1fr}.side{display:flex;gap:5px;overflow-x:auto;padding:9px;border-right:0;border-bottom:1px solid #243b29}.side-caption{display:none}.navbtn{flex:0 0 auto;width:auto;margin:0}}
@@ -347,6 +476,7 @@ export default function Home() {
             <div className="tagline">Mine Smart. Grow Digital.</div>
           </div>
         </div>
+
         {user && (
           <div className="topright">
             <span className="email">{user.email}</span>
@@ -360,18 +490,48 @@ export default function Home() {
           <div className="panel authpanel">
             <div className="eyebrow">CRYPTO MINING HUB</div>
             <h1 className="h1">{mode === "login" ? "Welcome Back" : "Create Account"}</h1>
-            <p className="muted">{mode === "login" ? "Sign in to view your account." : "Register for your account."}</p>
+            <p className="muted">
+              {mode === "login" ? "Sign in to view your account." : "Register for your account."}
+            </p>
+
             <form onSubmit={authSubmit}>
               <label className="label">Email</label>
-              <input className="field" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required placeholder="Email address" />
+              <input
+                className="field"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+                placeholder="Email address"
+              />
+
               <label className="label">Password</label>
-              <input className="field" type="password" value={password} onChange={(e) => setPassword(e.target.value)} minLength={6} required placeholder="Password" />
-              <button className="primary" disabled={authBusy}>{authBusy ? "PLEASE WAIT..." : mode === "login" ? "LOGIN" : "CREATE ACCOUNT"}</button>
+              <input
+                className="field"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                minLength={6}
+                required
+                placeholder="Password"
+              />
+
+              <button className="primary" disabled={authBusy}>
+                {authBusy ? "PLEASE WAIT..." : mode === "login" ? "LOGIN" : "CREATE ACCOUNT"}
+              </button>
             </form>
+
             {authMsg && <p className="muted">{authMsg}</p>}
-            <p className="muted" style={{ marginTop:16 }}>
+
+            <p className="muted" style={{ marginTop: 16 }}>
               {mode === "login" ? "New here?" : "Already registered?"}{" "}
-              <button className="copybtn" onClick={() => {setMode(mode === "login" ? "register" : "login");setAuthMsg("");}}>
+              <button
+                className="copybtn"
+                onClick={() => {
+                  setMode(mode === "login" ? "register" : "login");
+                  setAuthMsg("");
+                }}
+              >
                 {mode === "login" ? "Register" : "Login"}
               </button>
             </p>
@@ -382,8 +542,13 @@ export default function Home() {
           <aside className="side">
             <div className="side-caption">MAIN MENU</div>
             {nav.map(([id, icon, label]) => (
-              <button key={id} className={`navbtn ${section === id ? "active" : ""}`} onClick={() => go(id)}>
-                <span className="navicon">{icon}</span>{label}
+              <button
+                key={id}
+                className={`navbtn ${section === id ? "active" : ""}`}
+                onClick={() => go(id)}
+              >
+                <span className="navicon">{icon}</span>
+                {label}
               </button>
             ))}
           </aside>
@@ -401,19 +566,24 @@ export default function Home() {
             <div className="stats">
               <div className="stat">
                 <div className="statlabel">Wallet Balance</div>
-                <span className="statvalue">{loading ? "Loading..." : `${money(wallet?.balance)} USDT`}</span>
+                <span className="statvalue">
+                  {loading ? "Loading..." : `${money(wallet?.balance)} USDT`}
+                </span>
                 <div className="statnote">USDT · BEP20</div>
               </div>
+
               <div className="stat">
                 <div className="statlabel">Confirmed Deposits</div>
                 <span className="statvalue">{money(depositTotal)} USDT</span>
                 <div className="statnote">Confirmed transactions</div>
               </div>
+
               <div className="stat">
                 <div className="statlabel">Active Plans</div>
                 <span className="statvalue">{activePlans.length}</span>
                 <div className="statnote">{money(activeAmount)} USDT recorded</div>
               </div>
+
               <div className="stat">
                 <div className="statlabel">Pending Plans</div>
                 <span className="statvalue">{pendingPlans.length}</span>
@@ -435,6 +605,7 @@ export default function Home() {
                       {loading ? "Loading..." : "↻ Refresh"}
                     </button>
                   </div>
+
                   {purchases.length === 0 ? (
                     <div className="empty">No investment records found.</div>
                   ) : (
@@ -442,8 +613,12 @@ export default function Home() {
                       {purchases.map((p) => (
                         <div className="item" key={p.id}>
                           <div className="itemtop">
-                            <div className="itemamount">{p.plan_name || "Plan"} · ${money(p.price_usdt || p.principal_usdt)}</div>
-                            <span className={`badge ${statusClass(p.status)}`}>{p.status || "Unknown"}</span>
+                            <div className="itemamount">
+                              {p.plan_name || "Plan"} · ${money(p.price_usdt || p.principal_usdt)}
+                            </div>
+                            <span className={`badge ${statusClass(p.status)}`}>
+                              {p.status || "Unknown"}
+                            </span>
                           </div>
                           <div className="detail">
                             Created: {dateText(p.created_at)}
@@ -457,50 +632,87 @@ export default function Home() {
 
                 <div className="panel" id="plans">
                   <h2>Investment Plans</h2>
-                  <p className="muted">Choose a plan. Payment uses USDT on BEP20. Activation follows payment confirmation.</p>
+                  <p className="muted">
+                    Choose a plan. Payment uses USDT on BEP20. Activation follows payment confirmation.
+                  </p>
+
                   <div className="plans">
                     {plans.map((plan) => (
                       <div className="plan" id={`plan-${plan.name}`} key={plan.name}>
                         <div className="planname">{plan.name}</div>
                         <div className="price">${plan.price.toLocaleString("en-US")}</div>
                         <div className="planhint">USDT · BEP20</div>
-                        <button className="primary" onClick={() => buyPlan(plan)} disabled={!!busyAction}>
+
+                        <button
+                          className="primary"
+                          onClick={() => buyPlan(plan)}
+                          disabled={!!busyAction}
+                        >
                           {busyAction === plan.name ? "CREATING PAYMENT..." : "BUY PLAN"}
                         </button>
-                        {payment?.kind === "plan" && payment?.planName === plan.name &&
+
+                        {payment?.kind === "plan" &&
+                          payment?.planName === plan.name &&
                           paymentDetails(payment, `${plan.name} PAYMENT DETAILS`)}
                       </div>
                     ))}
                   </div>
+
                   {actionMsg && <p className="error">{actionMsg}</p>}
                 </div>
 
                 <div className="panel" id="deposit">
                   <h2>Make a Deposit</h2>
                   <p className="muted">Deposit using USDT on BNB Smart Chain (BEP20).</p>
+
                   <form onSubmit={createDeposit}>
                     <label className="label">Deposit Amount (USD)</label>
-                    <input className="field" type="number" min="1" max="10000" step="0.01" value={depositAmount} onChange={(e) => setDepositAmount(e.target.value)} required />
+                    <input
+                      className="field"
+                      type="number"
+                      min="1"
+                      max="10000"
+                      step="0.01"
+                      value={depositAmount}
+                      onChange={(e) => setDepositAmount(e.target.value)}
+                      required
+                    />
                     <button className="primary" disabled={!!busyAction}>
                       {busyAction === "deposit" ? "CREATING PAYMENT..." : "CREATE DEPOSIT PAYMENT"}
                     </button>
                   </form>
-                  {actionMsg && payment?.kind === "deposit" && <p className="message">{actionMsg}</p>}
-                  {payment?.kind === "deposit" && paymentDetails(payment, "DEPOSIT PAYMENT DETAILS")}
+
+                  {actionMsg && payment?.kind === "deposit" && (
+                    <p className="message">{actionMsg}</p>
+                  )}
+
+                  {payment?.kind === "deposit" &&
+                    paymentDetails(payment, "DEPOSIT PAYMENT DETAILS")}
                 </div>
 
                 <div className="panel" id="deposits">
                   <h2>Deposit History</h2>
-                  {deposits.length === 0 ? <div className="empty">No deposit records found.</div> : (
+
+                  {deposits.length === 0 ? (
+                    <div className="empty">No deposit records found.</div>
+                  ) : (
                     <div className="list">
                       {deposits.map((d) => (
                         <div className="item" key={d.id}>
                           <div className="itemtop">
-                            <span className="itemamount">${money(d.price_amount ?? d.amount)}</span>
-                            <span className={`badge ${statusClass(d.status)}`}>{d.status || "Pending"}</span>
+                            <span className="itemamount">
+                              ${money(d.price_amount ?? d.amount)}
+                            </span>
+                            <span className={`badge ${statusClass(d.status)}`}>
+                              {d.status || "Pending"}
+                            </span>
                           </div>
-                          <div className="detail">{d.currency || "USDT"} · {d.network || "Network not set"} · {dateText(d.created_at)}</div>
-                          {d.provider_payment_id && <div className="detail">Payment ID: {d.provider_payment_id}</div>}
+                          <div className="detail">
+                            {d.currency || "USDT"} · {d.network || "Network not set"} · {dateText(d.created_at)}
+                          </div>
+                          {d.provider_payment_id && (
+                            <div className="detail">Payment ID: {d.provider_payment_id}</div>
+                          )}
                         </div>
                       ))}
                     </div>
@@ -512,20 +724,130 @@ export default function Home() {
                 <div className="panel" id="wallet">
                   <h2>My Wallet</h2>
                   <p className="muted">Balance for your USDT BEP20 wallet.</p>
+
                   <div className="walletbox">
                     <div className="muted">AVAILABLE BALANCE</div>
-                    <div className="balance">{loading ? "Loading..." : `${money(wallet?.balance)} USDT`}</div>
+                    <div className="balance">
+                      {loading ? "Loading..." : `${money(wallet?.balance)} USDT`}
+                    </div>
                     <span className="network">BNB Smart Chain · BEP20</span>
                   </div>
-                  {!wallet && !loading && <p className="muted">Wallet record not found.</p>}
+
+                  {!wallet && !loading && (
+                    <p className="muted">Wallet record not found.</p>
+                  )}
+
+                  <button
+                    className="primary"
+                    type="button"
+                    disabled={loading || !wallet || !!busyAction}
+                    onClick={() => {
+                      setWithdrawOpen(!withdrawOpen);
+                      setSection("wallet");
+                      setWithdrawError("");
+                      setWithdrawMsg("");
+                    }}
+                  >
+                    {withdrawOpen ? "CLOSE WITHDRAWAL FORM" : "WITHDRAW"}
+                  </button>
+
+                  {withdrawOpen && (
+                    <form className="withdrawform" onSubmit={submitWithdrawal}>
+                      <h3>Withdraw USDT</h3>
+                      <p className="muted">
+                        Minimum withdrawal: $10 USDT. Network: BEP20.
+                      </p>
+
+                      <label className="label">Withdrawal Amount (USDT)</label>
+                      <input
+                        className="field"
+                        type="number"
+                        min="10"
+                        max={Number(wallet?.balance || 0)}
+                        step="0.01"
+                        value={withdrawAmount}
+                        onChange={(e) => setWithdrawAmount(e.target.value)}
+                        required
+                      />
+
+                      <label className="label">USDT BEP20 Wallet Address</label>
+                      <input
+                        className="field"
+                        type="text"
+                        placeholder="Enter your BEP20 wallet address"
+                        value={withdrawAddress}
+                        onChange={(e) => setWithdrawAddress(e.target.value)}
+                        minLength={20}
+                        maxLength={150}
+                        required
+                      />
+
+                      <p className="detail">
+                        Available balance: {money(wallet?.balance)} USDT
+                      </p>
+
+                      <button
+                        className="primary"
+                        type="submit"
+                        disabled={!!busyAction}
+                      >
+                        {busyAction === "withdraw" ? "SUBMITTING..." : "SUBMIT WITHDRAWAL"}
+                      </button>
+
+                      {withdrawError && <p className="error">{withdrawError}</p>}
+                    </form>
+                  )}
+
+                  {withdrawMsg && <p className="message">{withdrawMsg}</p>}
                 </div>
 
                 <div className="panel" id="withdrawals">
                   <h2>Withdrawals</h2>
                   <p className="muted">Withdrawal network: USDT BEP20.</p>
-                  <div className="withdrawnote">
-                    Withdrawal is not enabled yet. Available funds must be validated, reserved, and protected against duplicate requests before withdrawals can be processed.
-                  </div>
+
+                  <button
+                    className="secondary"
+                    type="button"
+                    onClick={() => {
+                      setWithdrawOpen(true);
+                      go("wallet");
+                    }}
+                  >
+                    + NEW WITHDRAWAL
+                  </button>
+
+                  {withdrawError && <p className="error">{withdrawError}</p>}
+                  {withdrawMsg && <p className="message">{withdrawMsg}</p>}
+
+                  {withdrawals.length === 0 ? (
+                    <div className="empty" style={{ marginTop: 14 }}>
+                      No withdrawal requests found.
+                    </div>
+                  ) : (
+                    <div className="list">
+                      {withdrawals.map((w) => (
+                        <div className="item" key={w.id}>
+                          <div className="itemtop">
+                            <span className="itemamount">
+                              {money(w.amount)} {w.currency || "USDT"}
+                            </span>
+                            <span className={`badge ${statusClass(w.status)}`}>
+                              {w.status || "Pending"}
+                            </span>
+                          </div>
+                          <div className="detail">
+                            Network: {w.network || "BEP20"}
+                          </div>
+                          <div className="detail">
+                            Wallet: {w.wallet_address || "—"}
+                          </div>
+                          <div className="detail">
+                            Submitted: {dateText(w.created_at)}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 <div className="panel" id="profit">
@@ -539,14 +861,24 @@ export default function Home() {
                 <div className="panel" id="account">
                   <h2>Account</h2>
                   <p className="muted">Signed in email</p>
-                  <div style={{ overflowWrap:"anywhere", margin:"12px 0" }}>{user.email}</div>
+                  <div style={{ overflowWrap: "anywhere", margin: "12px 0" }}>
+                    {user.email}
+                  </div>
                   <span className="network">Supabase authenticated account</span>
-                  <button className="secondary" style={{marginTop:14}} onClick={logout}>Sign Out</button>
+                  <button
+                    className="secondary"
+                    style={{ marginTop: 14 }}
+                    onClick={logout}
+                  >
+                    Sign Out
+                  </button>
                 </div>
               </div>
             </div>
 
-            <footer className="footer">© {new Date().getFullYear()} Crypto Mining Hub · Mine Smart. Grow Digital.</footer>
+            <footer className="footer">
+              © {new Date().getFullYear()} Crypto Mining Hub · Mine Smart. Grow Digital.
+            </footer>
           </section>
         </div>
       )}
