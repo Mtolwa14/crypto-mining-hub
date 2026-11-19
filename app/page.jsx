@@ -15,6 +15,8 @@ const plans = [
   { name: "VIP", price: 2000 },
 ];
 
+const LOCK_DAYS = 199;
+
 const nav = [
   ["overview", "⌂", "Dashboard"],
   ["referral", "♧", "Referrals"],
@@ -233,6 +235,11 @@ export default function Home() {
     setPayment(null);
 
     try {
+      const amount = Number(depositAmount);
+      if (!Number.isFinite(amount) || amount <= 0) {
+        throw new Error("Enter a valid deposit amount.");
+      }
+
       const access = await getToken();
       const response = await fetch("/api/deposit", {
         method: "POST",
@@ -240,7 +247,7 @@ export default function Home() {
           "Content-Type": "application/json",
           Authorization: `Bearer ${access}`,
         },
-        body: JSON.stringify({ amount: Number(depositAmount) }),
+        body: JSON.stringify({ amount }),
       });
 
       const result = await response.json();
@@ -248,7 +255,7 @@ export default function Home() {
         throw new Error(result.error || result.details || "Deposit creation failed.");
       }
 
-      setPayment({ ...result, kind: "deposit", amount: Number(depositAmount) });
+      setPayment({ ...result, kind: "deposit", amount });
       setActionMsg("Payment instructions created. Send only the amount displayed below.");
     } catch (err) {
       setActionMsg(err.message || "Deposit request failed.");
@@ -278,7 +285,14 @@ export default function Home() {
         throw new Error(result.error || result.details || "Plan payment could not be created.");
       }
 
-      setPayment({ ...result, kind: "plan", amount: plan.price, planName: plan.name });
+      setPayment({
+        ...result,
+        kind: "plan",
+        amount: plan.price,
+        planName: plan.name,
+      });
+
+      setActionMsg("Payment instructions created. Complete payment to activate your plan.");
     } catch (err) {
       setActionMsg(err.message || "Plan purchase failed.");
     } finally {
@@ -457,9 +471,12 @@ export default function Home() {
     if (id === "referral" || id === "account") loadReferralData();
     setPayment(null);
     setActionMsg("");
-    document.getElementById(id)?.scrollIntoView({
-      behavior: "smooth",
-      block: "start",
+
+    requestAnimationFrame(() => {
+      document.getElementById(id)?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
     });
   }
 
@@ -573,6 +590,102 @@ export default function Home() {
     );
   }
 
+  function miningPlansPanel() {
+    return (
+      <div className="plans-page" id="plans">
+        <div className="plans-hero">
+          <div className="eyebrow">CRYPTO MINING HUB · INVESTMENT PLANS</div>
+          <h1 className="h1">Choose Your Mining Plan</h1>
+          <p className="muted">
+            Select a plan that matches your budget. Payments are made using USDT on BNB Smart Chain (BEP20).
+          </p>
+          <div className="plan-rules">
+            <div>
+              <span className="rule-icon">◈</span>
+              <div>
+                <strong>{LOCK_DAYS} DAYS</strong>
+                <small>Principal lock period</small>
+              </div>
+            </div>
+            <div>
+              <span className="rule-icon">％</span>
+              <div>
+                <strong>Daily profit rate</strong>
+                <small>Displayed after rates are configured and verified</small>
+              </div>
+            </div>
+            <div>
+              <span className="rule-icon">$</span>
+              <div>
+                <strong>$10 USDT</strong>
+                <small>Minimum profit withdrawal target</small>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {actionMsg && <p className="error">{actionMsg}</p>}
+
+        <div className="plans-grid">
+          {plans.map((plan, index) => (
+            <div className={`plan-card plan-card-${index + 1}`} key={plan.name}>
+              <div className="plan-card-top">
+                <div className="planname">{plan.name}</div>
+                {index === 7 && <span className="vip-tag">VIP</span>}
+              </div>
+
+              <div className="price">${plan.price.toLocaleString("en-US")}</div>
+              <div className="planhint">USDT · BEP20</div>
+
+              <div className="plan-details">
+                <div className="plan-detail-row">
+                  <span>Daily profit rate</span>
+                  <strong className="rate-pending">Not configured</strong>
+                </div>
+                <div className="plan-detail-row">
+                  <span>Estimated daily profit</span>
+                  <strong>— USDT</strong>
+                </div>
+                <div className="plan-detail-row">
+                  <span>Principal lock</span>
+                  <strong>{LOCK_DAYS} days</strong>
+                </div>
+                <div className="plan-detail-row">
+                  <span>Payment network</span>
+                  <strong>USDT BEP20</strong>
+                </div>
+              </div>
+
+              <button
+                className="primary invest-button"
+                onClick={() => buyPlan(plan)}
+                disabled={!!busyAction}
+              >
+                {busyAction === plan.name
+                  ? "CREATING PAYMENT..."
+                  : "INVEST NOW"}
+              </button>
+
+              {payment?.kind === "plan" &&
+                payment?.planName === plan.name &&
+                paymentDetails(payment, `${plan.name} PAYMENT DETAILS`)}
+            </div>
+          ))}
+        </div>
+
+        <div className="plans-disclaimer">
+          <strong>Important information</strong>
+          <p>
+            Daily profit rates and daily profit amounts are not configured yet.
+            No fixed return is promised or guaranteed. Actual profit, if any,
+            must be based on verifiable platform revenue and recorded allocations.
+            The 199-day lock period is displayed as the plan term.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <main className="cmh">
       <style jsx global>{`
@@ -619,11 +732,6 @@ export default function Home() {
         .walletbox{margin-top:13px;padding:22px;border:1px solid #80632e;border-radius:14px;background:linear-gradient(135deg,#282315,#191a17)}
         .balance{font-size:clamp(25px,5vw,35px);font-weight:900;color:#f3d98e;margin:10px 0;overflow-wrap:anywhere}
         .network{display:inline-block;padding:7px 10px;border-radius:8px;color:#c5ac70;background:#282316;border:1px solid #554522;font-size:10px}
-        .plans{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:13px;margin-top:15px;align-items:start}
-        .plan{padding:17px;background:linear-gradient(145deg,#1c1e24,#14161b);min-width:0}
-        .planname{color:#e5c46e;font-size:11px;font-weight:900;letter-spacing:1.4px}
-        .price{margin:8px 0;color:#fff1c7;font-size:23px;font-weight:900}
-        .planhint{color:#969da8;font-size:10px;margin-bottom:12px}
         .label{display:block;margin:14px 0 7px;color:#d4dbe4;font-size:11px}
         .field{display:block;width:100%;padding:13px;border:1px solid #3b404b;border-radius:10px;outline:none;background:#0c0e13;color:white}
         .field:focus{border-color:#d0ad58;box-shadow:0 0 0 3px #c9a34a20}
@@ -663,8 +771,36 @@ export default function Home() {
         .power-number{font-size:30px;font-weight:900;color:#f2d58c;margin:12px 0 4px}
         .power-track{height:7px;background:#34302a;border-radius:10px;overflow:hidden;margin:15px 0 8px}
         .power-fill{height:100%;width:68%;background:linear-gradient(90deg,#9b742d,#f2d58c);border-radius:10px}
+
+        /* Dedicated Mining Plans page */
+        .plans-page{scroll-margin-top:100px}
+        .plans-hero{padding:30px;border:1px solid #594626;border-radius:20px;background:radial-gradient(ellipse at 90% 0%,#74551d55,transparent 42%),linear-gradient(120deg,#1c1d20,#171710);margin-bottom:20px}
+        .plans-hero .h1{margin-top:12px}
+        .plan-rules{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:24px}
+        .plan-rules>div{display:flex;align-items:center;gap:12px;padding:13px;border:1px solid #49402d;border-radius:12px;background:#111319}
+        .rule-icon{width:35px;height:35px;flex:0 0 35px;display:grid;place-items:center;border-radius:10px;background:#382d19;color:#f0d58c;font-size:18px}
+        .plan-rules strong{display:block;color:#f2d58c;font-size:12px}
+        .plan-rules small{display:block;color:#969da8;font-size:9px;line-height:1.5;margin-top:5px}
+        .plans-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:15px}
+        .plan-card{padding:19px;border:1px solid #38332a;border-radius:16px;background:linear-gradient(145deg,#1d2026,#111319);box-shadow:0 12px 30px #0003;min-width:0}
+        .plan-card-4,.plan-card-7,.plan-card-8{border-color:#80632e;background:linear-gradient(145deg,#282315,#15161b)}
+        .plan-card-top{display:flex;justify-content:space-between;align-items:center;gap:8px}
+        .plan-card .price{font-size:27px;font-weight:950;color:#fff0c4;margin:12px 0 4px}
+        .plan-card .planhint{font-size:10px;color:#9299a4}
+        .vip-tag{font-size:9px;color:#171717;background:linear-gradient(135deg,#f5df9e,#b9872d);padding:5px 8px;border-radius:20px;font-weight:950}
+        .plan-details{margin-top:18px;border-top:1px solid #34343a}
+        .plan-detail-row{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;padding:11px 0;border-bottom:1px solid #292c33;font-size:10px}
+        .plan-detail-row span{color:#9ca3af}
+        .plan-detail-row strong{color:#e8d39c;text-align:right;font-size:10px}
+        .plan-detail-row .rate-pending{color:#e6b95f}
+        .invest-button{margin-top:17px}
+        .plans-disclaimer{margin-top:18px;padding:17px;border:1px solid #49402d;border-radius:12px;background:#14161b}
+        .plans-disclaimer strong{font-size:12px;color:#f0d58c}
+        .plans-disclaimer p{font-size:11px;line-height:1.7;color:#a4abb5;margin:7px 0 0}
+
+        @media(max-width:1150px){.plans-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
         @media(max-width:1050px){.stats{grid-template-columns:repeat(2,minmax(0,1fr))}.columns,.overview-grid{grid-template-columns:1fr}.layout{grid-template-columns:1fr}.side{position:sticky;top:78px;z-index:15;height:auto;display:flex;gap:5px;overflow-x:auto;padding:9px;border-right:0;border-bottom:1px solid #292c33;background:rgba(13,16,23,.97)}.side-caption{display:none}.navbtn{flex:0 0 auto;width:auto;margin:0}}
-        @media(max-width:640px){.top{height:68px;padding:10px 12px}.brand-title{font-size:11px}.logo{width:36px;height:36px}.email{display:none}.layout{min-height:calc(100vh - 68px)}.side{top:68px}.main{padding:16px 11px}.welcome{padding:18px}.panel,.chart-panel{padding:14px}.stat{padding:13px}.statvalue{font-size:16px}.plan{padding:11px}.plans{gap:9px}.price{font-size:20px}.navbtn{padding:10px 12px;font-size:10px}.chart-area{height:125px}}
+        @media(max-width:640px){.top{height:68px;padding:10px 12px}.brand-title{font-size:11px}.logo{width:36px;height:36px}.email{display:none}.layout{min-height:calc(100vh - 68px)}.side{top:68px}.main{padding:16px 11px}.welcome{padding:18px}.panel,.chart-panel{padding:14px}.stat{padding:13px}.statvalue{font-size:16px}.navbtn{padding:10px 12px;font-size:10px}.chart-area{height:125px}.plans-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}.plan-card{padding:12px}.plan-card .price{font-size:21px}.plan-detail-row{font-size:9px;gap:5px}.plan-detail-row strong{font-size:9px}.plans-hero{padding:19px}.plan-rules{grid-template-columns:1fr;gap:8px}.plan-rules>div{padding:10px}}
       `}</style>
 
       <header className="top">
@@ -755,216 +891,222 @@ export default function Home() {
               </div>
             </div>
 
-            <div className="overview-grid">
-              <div className="chart-panel">
-                <div className="chart-head">
-                  <div>
-                    <div className="chart-title">Earnings Overview</div>
-                    <div className="chart-sub">Recorded profit activity</div>
-                  </div>
-                  <span className="network">USDT</span>
-                </div>
-                <div className="chart-area">
-                  {[24, 38, 31, 55, 43, 70, 61, 88, 66, 96, 76, 100].map((height, i) => (
-                    <div className="chart-bar" key={i} style={{ height: `${height}%` }} />
-                  ))}
-                </div>
-                <div className="chart-labels"><span>JAN</span><span>MAR</span><span>MAY</span><span>JUL</span><span>SEP</span><span>DEC</span></div>
-                <p className="smallnote">Decorative overview graphic. Actual earnings are shown in your recorded profit total.</p>
-              </div>
-              <div className="power-card">
-                <div className="eyebrow">MINING PERFORMANCE</div>
-                <div className="chart-title" style={{ marginTop: 8 }}>Mining Power</div>
-                <div className="power-number">{activePlans.length} <span style={{ fontSize: 13 }}>ACTIVE PLANS</span></div>
-                <div className="power-track"><div className="power-fill" /></div>
-                <div className="chart-sub">{money(activeAmount)} USDT in active plans</div>
-                <p className="smallnote">Based on confirmed active plan records.</p>
-              </div>
-            </div>
-
-            {referralPanel()}
-            {loadError && <p className="error">Data issue: {loadError}</p>}
-
-            <div className="columns">
-              <div>
-                <div className="panel" id="investments">
-                  <div className="panelhead">
-                    <div>
-                      <h2>My Investments</h2>
-                      <p className="muted">View your mining plans and their current status.</p>
-                    </div>
-                    <button className="secondary" onClick={loadData} disabled={loading}>{loading ? "Loading..." : "↻ Refresh"}</button>
-                  </div>
-                  {purchases.length === 0 ? (
-                    <div className="empty">No investment records found.</div>
-                  ) : (
-                    <div className="list">
-                      {purchases.map((p) => (
-                        <div className="item" key={p.id}>
-                          <div className="itemtop">
-                            <div className="itemamount">{p.plan_name || "Plan"} · ${money(p.price_usdt || p.principal_usdt)}</div>
-                            <span className={`badge ${statusClass(p.status)}`}>{p.status || "Unknown"}</span>
-                          </div>
-                          <div className="detail">Created: {dateText(p.created_at)}{p.activated_at ? ` · Activated: ${dateText(p.activated_at)}` : ""}</div>
+            {section === "plans" ? (
+              miningPlansPanel()
+            ) : (
+              <>
+                {section === "overview" && (
+                  <div className="overview-grid">
+                    <div className="chart-panel">
+                      <div className="chart-head">
+                        <div>
+                          <div className="chart-title">Earnings Overview</div>
+                          <div className="chart-sub">Recorded profit activity</div>
                         </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                <div className="panel" id="plans">
-                  <h2>Mining Plans</h2>
-                  <p className="muted">Choose a plan. Payment uses USDT on BEP20. Activation follows payment confirmation.</p>
-                  <div className="plans">
-                    {plans.map((plan) => (
-                      <div className="plan" key={plan.name}>
-                        <div className="planname">{plan.name}</div>
-                        <div className="price">${plan.price.toLocaleString("en-US")}</div>
-                        <div className="planhint">USDT · BEP20</div>
-                        <button className="primary" onClick={() => buyPlan(plan)} disabled={!!busyAction}>
-                          {busyAction === plan.name ? "CREATING PAYMENT..." : "BUY PLAN"}
-                        </button>
-                        {payment?.kind === "plan" && payment?.planName === plan.name && paymentDetails(payment, `${plan.name} PAYMENT DETAILS`)}
+                        <span className="network">USDT</span>
                       </div>
-                    ))}
-                  </div>
-                  {actionMsg && <p className="error">{actionMsg}</p>}
-                </div>
-
-                <div className="panel" id="deposit">
-                  <h2>Make a Deposit</h2>
-                  <p className="muted">Deposit using USDT on BNB Smart Chain (BEP20).</p>
-                  <form onSubmit={createDeposit}>
-                    <label className="label">Deposit Amount (USD)</label>
-                    <input className="field" type="number" min="1" max="10000" step="0.01" value={depositAmount} onChange={(e) => setDepositAmount(e.target.value)} required />
-                    <button className="primary" disabled={!!busyAction}>{busyAction === "deposit" ? "CREATING PAYMENT..." : "CREATE DEPOSIT PAYMENT"}</button>
-                  </form>
-                  {actionMsg && payment?.kind === "deposit" && <p className="message">{actionMsg}</p>}
-                  {payment?.kind === "deposit" && paymentDetails(payment, "DEPOSIT PAYMENT DETAILS")}
-                </div>
-
-                <div className="panel" id="deposits">
-                  <h2>Deposit History</h2>
-                  {deposits.length === 0 ? <div className="empty">No deposit records found.</div> : (
-                    <div className="list">
-                      {deposits.map((d) => (
-                        <div className="item" key={d.id}>
-                          <div className="itemtop">
-                            <span className="itemamount">${money(d.price_amount ?? d.amount)}</span>
-                            <span className={`badge ${statusClass(d.status)}`}>{d.status || "Pending"}</span>
-                          </div>
-                          <div className="detail">{d.currency || "USDT"} · {d.network || "Network not set"} · {dateText(d.created_at)}</div>
-                          {d.provider_payment_id && <div className="detail">Payment ID: {d.provider_payment_id}</div>}
-                        </div>
-                      ))}
+                      <div className="chart-area">
+                        {[24, 38, 31, 55, 43, 70, 61, 88, 66, 96, 76, 100].map((height, i) => (
+                          <div className="chart-bar" key={i} style={{ height: `${height}%` }} />
+                        ))}
+                      </div>
+                      <div className="chart-labels"><span>JAN</span><span>MAR</span><span>MAY</span><span>JUL</span><span>SEP</span><span>DEC</span></div>
+                      <p className="smallnote">Decorative overview graphic. Actual earnings are shown in your recorded profit total.</p>
                     </div>
-                  )}
-                </div>
-              </div>
-
-              <div>
-                <div className="panel" id="wallet">
-                  <h2>My Wallet</h2>
-                  <p className="muted">Your USDT BEP20 wallet balance.</p>
-                  <div className="walletbox">
-                    <div className="muted">AVAILABLE BALANCE</div>
-                    <div className="balance">{loading ? "Loading..." : `${money(wallet?.balance)} USDT`}</div>
-                    <span className="network">BNB Smart Chain · BEP20</span>
-                  </div>
-                  {!wallet && !loading && <p className="muted">Wallet record not found.</p>}
-                  <button className="primary" type="button" disabled={loading || !!busyAction} onClick={() => { setWithdrawOpen(!withdrawOpen); setSection("wallet"); setWithdrawError(""); setWithdrawMsg(""); }}>
-                    {withdrawOpen ? "CLOSE WITHDRAWAL FORM" : "WITHDRAW"}
-                  </button>
-                  {withdrawOpen && (
-                    <form className="withdrawform" onSubmit={submitWithdrawal}>
-                      <h3>Withdraw USDT</h3>
-                      <p className="muted">Minimum withdrawal: $10 USDT. Network: BEP20.</p>
-                      <label className="label">Withdrawal Amount (USDT)</label>
-                      <input className="field" type="number" min="10" step="0.01" value={withdrawAmount} onChange={(e) => setWithdrawAmount(e.target.value)} required />
-                      <label className="label">USDT BEP20 Wallet Address</label>
-                      <input className="field" type="text" placeholder="Enter your BEP20 wallet address" value={withdrawAddress} onChange={(e) => setWithdrawAddress(e.target.value)} minLength={20} maxLength={150} required />
-                      <p className="detail">Available balance: {money(wallet?.balance)} USDT</p>
-                      {Number(wallet?.balance || 0) < 10 && <div className="withdrawnote">Your available balance is below the $10 minimum.</div>}
-                      <button className="primary" type="submit" disabled={!!busyAction || Number(withdrawAmount) < 10 || Number(withdrawAmount) > Number(wallet?.balance || 0)}>
-                        {busyAction === "withdraw" ? "SUBMITTING..." : "SUBMIT WITHDRAWAL"}
-                      </button>
-                      {withdrawError && <p className="error">{withdrawError}</p>}
-                    </form>
-                  )}
-                  {withdrawMsg && <p className="message">{withdrawMsg}</p>}
-                </div>
-
-                <div className="panel" id="withdrawals">
-                  <h2>Withdrawals</h2>
-                  <p className="muted">Withdrawal network: USDT BEP20.</p>
-                  <button className="secondary" type="button" onClick={() => { setWithdrawOpen(true); go("wallet"); }}>+ NEW WITHDRAWAL</button>
-                  {withdrawError && <p className="error">{withdrawError}</p>}
-                  {withdrawMsg && <p className="message">{withdrawMsg}</p>}
-                  {withdrawals.length === 0 ? <div className="empty" style={{ marginTop: 14 }}>No withdrawal requests found.</div> : (
-                    <div className="list">
-                      {withdrawals.map((w) => (
-                        <div className="item" key={w.id}>
-                          <div className="itemtop">
-                            <span className="itemamount">{money(w.amount)} {w.currency || "USDT"}</span>
-                            <span className={`badge ${statusClass(w.status)}`}>{w.status || "Pending"}</span>
-                          </div>
-                          <div className="detail">Network: {w.network || "BEP20"}</div>
-                          <div className="detail">Wallet: {w.wallet_address || "—"}</div>
-                          <div className="detail">Submitted: {dateText(w.created_at)}</div>
-                        </div>
-                      ))}
+                    <div className="power-card">
+                      <div className="eyebrow">MINING PERFORMANCE</div>
+                      <div className="chart-title" style={{ marginTop: 8 }}>Mining Power</div>
+                      <div className="power-number">{activePlans.length} <span style={{ fontSize: 13 }}>ACTIVE PLANS</span></div>
+                      <div className="power-track"><div className="power-fill" /></div>
+                      <div className="chart-sub">{money(activeAmount)} USDT in active plans</div>
+                      <p className="smallnote">Based on confirmed active plan records.</p>
                     </div>
-                  )}
-                </div>
+                  </div>
+                )}
 
-                <div className="panel" id="profit">
-                  <h2>Profit &amp; Loss</h2>
-                  <p className="muted">Your recorded investment profit allocations.</p>
-                  <div className="walletbox">
-                    <div className="muted">TOTAL RECORDED PROFIT</div>
-                    <div className="balance">{money(totalProfit)} USDT</div>
-                    <span className="network">Recorded allocations only</span>
-                  </div>
-                  <div className="withdrawnote" style={{ marginTop: 12 }}>
-                    Total approved withdrawals: {money(totalWithdrawn)} USDT. Profit figures are based only on records entered and allocated by the platform. They are not guaranteed earnings.
-                  </div>
-                  {profits.length === 0 ? <div className="empty" style={{ marginTop: 14 }}>No profit allocations have been recorded for your account yet.</div> : (
-                    <div className="list">
-                      {profits.map((p) => (
-                        <div className="item" key={p.id}>
-                          <div className="itemtop">
-                            <span className="itemamount">+{money(p.profit_usdt)} USDT</span>
-                            <span className="badge ok">ALLOCATED</span>
+                {section === "referral" && referralPanel()}
+
+                {loadError && <p className="error">Data issue: {loadError}</p>}
+
+                <div className="columns">
+                  <div>
+                    {section === "investments" && (
+                      <div className="panel" id="investments">
+                        <div className="panelhead">
+                          <div>
+                            <h2>My Investments</h2>
+                            <p className="muted">View your mining plans and their current status.</p>
                           </div>
-                          <div className="detail">Period: {p.period_name || "—"} · Plan: {p.plan_name || "—"}</div>
-                          <div className="detail">Principal: {money(p.principal_usdt)} USDT · Source: {p.source || "—"}</div>
-                          <div className="detail">Recorded: {dateText(p.created_at)}</div>
+                          <button className="secondary" onClick={loadData} disabled={loading}>{loading ? "Loading..." : "↻ Refresh"}</button>
                         </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
+                        {purchases.length === 0 ? (
+                          <div className="empty">No investment records found.</div>
+                        ) : (
+                          <div className="list">
+                            {purchases.map((p) => (
+                              <div className="item" key={p.id}>
+                                <div className="itemtop">
+                                  <div className="itemamount">{p.plan_name || "Plan"} · ${money(p.price_usdt || p.principal_usdt)}</div>
+                                  <span className={`badge ${statusClass(p.status)}`}>{p.status || "Unknown"}</span>
+                                </div>
+                                <div className="detail">Created: {dateText(p.created_at)}{p.activated_at ? ` · Activated: ${dateText(p.activated_at)}` : ""}</div>
+                                <div className="detail">Plan term: {LOCK_DAYS} days (displayed plan term)</div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
 
-                <div className="panel" id="account">
-                  <h2>Account</h2>
-                  <p className="muted">Signed in email</p>
-                  <div style={{ overflowWrap: "anywhere", margin: "12px 0" }}>{user.email}</div>
-                  <span className="network">Supabase authenticated account</span>
-                  <h3 style={{ marginTop: 22 }}>Apply Referral Code</h3>
-                  {referralAlreadyLinked ? (
-                    <div className="empty">A referral code has already been linked to this account.</div>
-                  ) : (
-                    <form onSubmit={applyReferralCode}>
-                      <label className="label">Referral Code</label>
-                      <input className="field" value={accountReferralCode} onChange={(e) => setAccountReferralCode(e.target.value.toUpperCase())} placeholder="Enter referral code" required />
-                      <button className="primary" type="submit" disabled={referralApplyBusy}>{referralApplyBusy ? "APPLYING..." : "APPLY CODE"}</button>
-                    </form>
-                  )}
-                  {referralApplyMsg && <p className="message">{referralApplyMsg}</p>}
-                  <button className="secondary" style={{ marginTop: 14 }} onClick={logout}>Sign Out</button>
+                    {section === "deposit" && (
+                      <div className="panel" id="deposit">
+                        <h2>Make a Deposit</h2>
+                        <p className="muted">Deposit using USDT on BNB Smart Chain (BEP20).</p>
+                        <form onSubmit={createDeposit}>
+                          <label className="label">Deposit Amount (USD)</label>
+                          <input className="field" type="number" min="1" max="10000" step="0.01" value={depositAmount} onChange={(e) => setDepositAmount(e.target.value)} required />
+                          <button className="primary" disabled={!!busyAction}>{busyAction === "deposit" ? "CREATING PAYMENT..." : "CREATE DEPOSIT PAYMENT"}</button>
+                        </form>
+                        {actionMsg && payment?.kind === "deposit" && <p className="message">{actionMsg}</p>}
+                        {payment?.kind === "deposit" && paymentDetails(payment, "DEPOSIT PAYMENT DETAILS")}
+                        {actionMsg && !payment && <p className="error">{actionMsg}</p>}
+                      </div>
+                    )}
+
+                    {section === "deposits" && (
+                      <div className="panel" id="deposits">
+                        <h2>Deposit History</h2>
+                        {deposits.length === 0 ? <div className="empty">No deposit records found.</div> : (
+                          <div className="list">
+                            {deposits.map((d) => (
+                              <div className="item" key={d.id}>
+                                <div className="itemtop">
+                                  <span className="itemamount">${money(d.price_amount ?? d.amount)}</span>
+                                  <span className={`badge ${statusClass(d.status)}`}>{d.status || "Pending"}</span>
+                                </div>
+                                <div className="detail">{d.currency || "USDT"} · {d.network || "Network not set"} · {dateText(d.created_at)}</div>
+                                {d.provider_payment_id && <div className="detail">Payment ID: {d.provider_payment_id}</div>}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  <div>
+                    {section === "wallet" && (
+                      <div className="panel" id="wallet">
+                        <h2>My Wallet</h2>
+                        <p className="muted">Your USDT BEP20 wallet balance.</p>
+                        <div className="walletbox">
+                          <div className="muted">AVAILABLE BALANCE</div>
+                          <div className="balance">{loading ? "Loading..." : `${money(wallet?.balance)} USDT`}</div>
+                          <span className="network">BNB Smart Chain · BEP20</span>
+                        </div>
+                        {!wallet && !loading && <p className="muted">Wallet record not found.</p>}
+                        <button className="primary" type="button" disabled={loading || !!busyAction} onClick={() => { setWithdrawOpen(!withdrawOpen); setWithdrawError(""); setWithdrawMsg(""); }}>
+                          {withdrawOpen ? "CLOSE WITHDRAWAL FORM" : "WITHDRAW"}
+                        </button>
+                        {withdrawOpen && (
+                          <form className="withdrawform" onSubmit={submitWithdrawal}>
+                            <h3>Withdraw USDT</h3>
+                            <p className="muted">Minimum withdrawal: $10 USDT. Network: BEP20.</p>
+                            <label className="label">Withdrawal Amount (USDT)</label>
+                            <input className="field" type="number" min="10" step="0.01" value={withdrawAmount} onChange={(e) => setWithdrawAmount(e.target.value)} required />
+                            <label className="label">USDT BEP20 Wallet Address</label>
+                            <input className="field" type="text" placeholder="Enter your BEP20 wallet address" value={withdrawAddress} onChange={(e) => setWithdrawAddress(e.target.value)} minLength={20} maxLength={150} required />
+                            <p className="detail">Available wallet balance: {money(wallet?.balance)} USDT</p>
+                            {Number(wallet?.balance || 0) < 10 && <div className="withdrawnote">Your available balance is below the $10 minimum.</div>}
+                            <button className="primary" type="submit" disabled={!!busyAction || Number(withdrawAmount) < 10 || Number(withdrawAmount) > Number(wallet?.balance || 0)}>
+                              {busyAction === "withdraw" ? "SUBMITTING..." : "SUBMIT WITHDRAWAL"}
+                            </button>
+                            {withdrawError && <p className="error">{withdrawError}</p>}
+                          </form>
+                        )}
+                        {withdrawMsg && <p className="message">{withdrawMsg}</p>}
+                      </div>
+                    )}
+
+                    {section === "withdrawals" && (
+                      <div className="panel" id="withdrawals">
+                        <h2>Withdrawals</h2>
+                        <p className="muted">Withdrawal network: USDT BEP20.</p>
+                        <button className="secondary" type="button" onClick={() => { setWithdrawOpen(true); go("wallet"); }}>+ NEW WITHDRAWAL</button>
+                        {withdrawError && <p className="error">{withdrawError}</p>}
+                        {withdrawMsg && <p className="message">{withdrawMsg}</p>}
+                        {withdrawals.length === 0 ? <div className="empty" style={{ marginTop: 14 }}>No withdrawal requests found.</div> : (
+                          <div className="list">
+                            {withdrawals.map((w) => (
+                              <div className="item" key={w.id}>
+                                <div className="itemtop">
+                                  <span className="itemamount">{money(w.amount)} {w.currency || "USDT"}</span>
+                                  <span className={`badge ${statusClass(w.status)}`}>{w.status || "Pending"}</span>
+                                </div>
+                                <div className="detail">Network: {w.network || "BEP20"}</div>
+                                <div className="detail">Wallet: {w.wallet_address || "—"}</div>
+                                <div className="detail">Submitted: {dateText(w.created_at)}</div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {section === "profit" && (
+                      <div className="panel" id="profit">
+                        <h2>Profit &amp; Loss</h2>
+                        <p className="muted">Your recorded investment profit allocations.</p>
+                        <div className="walletbox">
+                          <div className="muted">TOTAL RECORDED PROFIT</div>
+                          <div className="balance">{money(totalProfit)} USDT</div>
+                          <span className="network">Recorded allocations only</span>
+                        </div>
+                        <div className="withdrawnote" style={{ marginTop: 12 }}>
+                          Total approved withdrawals: {money(totalWithdrawn)} USDT. Profit figures are based only on records entered and allocated by the platform. They are not guaranteed earnings.
+                        </div>
+                        {profits.length === 0 ? <div className="empty" style={{ marginTop: 14 }}>No profit allocations have been recorded for your account yet.</div> : (
+                          <div className="list">
+                            {profits.map((p) => (
+                              <div className="item" key={p.id}>
+                                <div className="itemtop">
+                                  <span className="itemamount">+{money(p.profit_usdt)} USDT</span>
+                                  <span className="badge ok">ALLOCATED</span>
+                                </div>
+                                <div className="detail">Period: {p.period_name || "—"} · Plan: {p.plan_name || "—"}</div>
+                                <div className="detail">Principal: {money(p.principal_usdt)} USDT · Source: {p.source || "—"}</div>
+                                <div className="detail">Recorded: {dateText(p.created_at)}</div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {section === "account" && (
+                      <div className="panel" id="account">
+                        <h2>Account</h2>
+                        <p className="muted">Signed in email</p>
+                        <div style={{ overflowWrap: "anywhere", margin: "12px 0" }}>{user.email}</div>
+                        <span className="network">Supabase authenticated account</span>
+                        <h3 style={{ marginTop: 22 }}>Apply Referral Code</h3>
+                        {referralAlreadyLinked ? (
+                          <div className="empty">A referral code has already been linked to this account.</div>
+                        ) : (
+                          <form onSubmit={applyReferralCode}>
+                            <label className="label">Referral Code</label>
+                            <input className="field" value={accountReferralCode} onChange={(e) => setAccountReferralCode(e.target.value.toUpperCase())} placeholder="Enter referral code" required />
+                            <button className="primary" type="submit" disabled={referralApplyBusy}>{referralApplyBusy ? "APPLYING..." : "APPLY CODE"}</button>
+                          </form>
+                        )}
+                        {referralApplyMsg && <p className="message">{referralApplyMsg}</p>}
+                        <button className="secondary" style={{ marginTop: 14 }} onClick={logout}>Sign Out</button>
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </div>
-            </div>
+              </>
+            )}
 
             <footer className="footer">© {new Date().getFullYear()} Crypto Mining Hub · Mine Smart. Grow Digital.</footer>
           </section>
