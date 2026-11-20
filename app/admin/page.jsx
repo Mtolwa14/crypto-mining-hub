@@ -86,7 +86,9 @@ export default function AdminDashboard() {
 
     const errors = [u.error, t.error, i.error, w.error].filter(Boolean);
 
-    if (errors.length) setError(errors.map((e) => e.message).join(" | "));
+    if (errors.length) {
+      setError(errors.map((e) => e.message).join(" | "));
+    }
   }
 
   async function loadUsers() {
@@ -111,6 +113,7 @@ export default function AdminDashboard() {
 
   const filteredUsers = users.filter((user) => {
     const q = search.toLowerCase();
+
     return (
       (user.email || "").toLowerCase().includes(q) ||
       (user.user_id || "").toLowerCase().includes(q)
@@ -180,9 +183,13 @@ export default function AdminDashboard() {
       <main style={styles.main}>
         <header style={styles.header}>
           <div>
-            <div style={styles.breadcrumb}>ADMIN / {section.toUpperCase()}</div>
+            <div style={styles.breadcrumb}>
+              ADMIN / {section.toUpperCase()}
+            </div>
             <h1 style={styles.heading}>{section}</h1>
-            <p style={styles.subtitle}>Manage Crypto Mining Hub platform.</p>
+            <p style={styles.subtitle}>
+              Manage Crypto Mining Hub platform.
+            </p>
           </div>
 
           <div style={styles.status}>
@@ -206,7 +213,9 @@ export default function AdminDashboard() {
                       {card.icon}
                     </div>
                   </div>
-                  <div style={styles.cardValue}>{card.value.toLocaleString()}</div>
+                  <div style={styles.cardValue}>
+                    {card.value.toLocaleString()}
+                  </div>
                   <div style={styles.cardFooter}>Database count</div>
                 </div>
               ))}
@@ -215,6 +224,7 @@ export default function AdminDashboard() {
             <div style={styles.contentGrid}>
               <div style={styles.panel}>
                 <h2 style={styles.panelTitle}>Platform Status</h2>
+
                 {[
                   ["Authentication", "Connected"],
                   ["Admin Security", "Verified"],
@@ -248,6 +258,7 @@ export default function AdminDashboard() {
                   Total registered users: {users.length}
                 </p>
               </div>
+
               <button
                 style={styles.refreshButton}
                 onClick={loadUsers}
@@ -272,10 +283,13 @@ export default function AdminDashboard() {
                     <th style={styles.th}>REGISTERED</th>
                   </tr>
                 </thead>
+
                 <tbody>
                   {filteredUsers.map((user) => (
                     <tr key={user.user_id}>
-                      <td style={styles.td}>{user.email || "No email"}</td>
+                      <td style={styles.td}>
+                        {user.email || "No email"}
+                      </td>
                       <td style={styles.tdUserId}>{user.user_id}</td>
                       <td style={styles.td}>
                         {user.created_at
@@ -284,6 +298,7 @@ export default function AdminDashboard() {
                       </td>
                     </tr>
                   ))}
+
                   {filteredUsers.length === 0 && (
                     <tr>
                       <td colSpan={3} style={styles.empty}>
@@ -323,6 +338,7 @@ const styles = {
     display: "flex",
     fontFamily: "Arial, sans-serif",
   },
+
   loading: {
     minHeight: "100vh",
     background: "#090b0f",
@@ -333,7 +349,12 @@ const styles = {
     justifyContent: "center",
     gap: 14,
   },
-  loadingLogo: { fontSize: 48, fontWeight: 900 },
+
+  loadingLogo: {
+    fontSize: 48,
+    fontWeight: 900,
+  },
+
   sidebar: {
     width: 245,
     minHeight: "100vh",
@@ -344,7 +365,14 @@ const styles = {
     flexDirection: "column",
     flexShrink: 0,
   },
-  brand: { display: "flex", alignItems: "center", gap: 12, padding: "4px 8px 32px },
+
+  brand: {
+    display: "flex",
+    alignItems: "center",
+    gap: 12,
+    padding: "4px 8px 32px",
+  },
+
   logo: {
     width: 43,
     height: 43,
@@ -356,9 +384,27 @@ const styles = {
     fontSize: 25,
     fontWeight: 900,
   },
-  brandName: { fontSize: 12, fontWeight: 900, letterSpacing: 1.3 },
-  brandSub: { fontSize: 10, color: "#d4ad55", letterSpacing: 2, marginTop: 5 },
-  menuLabel: { color: "#646b64", fontSize: 10, letterSpacing: 1.8, margin: "10px 10px 12px" },
+
+  brandName: {
+    fontSize: 12,
+    fontWeight: 900,
+    letterSpacing: 1.3,
+  },
+
+  brandSub: {
+    fontSize: 10,
+    color: "#d4ad55",
+    letterSpacing: 2,
+    marginTop: 5,
+  },
+
+  menuLabel: {
+    color: "#646b64",
+    fontSize: 10,
+    letterSpacing: 1.8,
+    margin: "10px 10px 12px",
+  },
+
   menuItem: {
     width: "100%",
     padding: "13px 12px",
@@ -374,46 +420,319 @@ const styles = {
     textAlign: "left",
     cursor: "pointer",
   },
-  activeMenu: { background: "#242117", color: "#e5c46f", border: "1px solid #5b4821" },
-  menuIcon: { width: 21, textAlign: "center", fontSize: 16 },
-  sidebarBottom: { marginTop: "auto", paddingTop: 20 },
-  adminBadge: { display: "flex", alignItems: "center", gap: 10, padding: "12px 8px", borderTop: "1px solid #252a25" },
-  adminAvatar: { width: 35, height: 35, borderRadius: "50%", background: "#b99446", color: "#111", display: "grid", placeItems: "center", fontWeight: 800 },
-  adminText: { fontSize: 12, fontWeight: 700 },
-  adminEmail: { fontSize: 10, color: "#858c84", marginTop: 4, overflowWrap: "anywhere" },
-  logout: { width: "100%", padding: 12, background: "#171a18", color: "#d0d4d0", border: "1px solid #2b302b", borderRadius: 8, marginTop: 8, cursor: "pointer" },
-  main: { flex: 1, padding: "38px 34px", minWidth: 0 },
-  header: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 20, flexWrap: "wrap", marginBottom: 36 },
-  breadcrumb: { fontSize: 10, letterSpacing: 2, color: "#c7a654", marginBottom: 12 },
-  heading: { fontSize: 28, margin: 0, fontWeight: 800 },
-  subtitle: { color: "#858d85", fontSize: 13, marginTop: 10 },
-  status: { border: "1px solid #31523b", background: "#14231a", color: "#8bd3a2", borderRadius: 30, padding: "10px 14px", fontSize: 10, letterSpacing: 0.8 },
-  statusDot: { display: "inline-block", width: 7, height: 7, borderRadius: "50%", background: "#64c881", marginRight: 8 },
-  error: { background: "#311b1b", color: "#ffb5a9", border: "1px solid #6b3333", padding: 14, borderRadius: 10, marginBottom: 20, fontSize: 12, overflowWrap: "anywhere" },
-  sectionTitle: { color: "#929990", fontSize: 11, letterSpacing: 1.6, marginBottom: 16 },
-  cards: { display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: 15 },
-  card: { background: "#11151a", border: "1px solid #262b30", borderRadius: 14, padding: 20 },
-  cardTop: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 },
-  cardLabel: { fontSize: 10, color: "#89918b", letterSpacing: 1 },
-  cardIcon: { width: 34, height: 34, borderRadius: 9, display: "grid", placeItems: "center", fontSize: 18 },
-  cardValue: { fontSize: 30, fontWeight: 800, marginTop: 22 },
-  cardFooter: { color: "#7d857e", fontSize: 10, marginTop: 13 },
-  contentGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(260px,1fr))", gap: 16, marginTop: 26 },
-  panel: { background: "#11151a", border: "1px solid #262b30", borderRadius: 14, padding: 22 },
-  panelTitle: { fontSize: 15, margin: "0 0 18px" },
-  statusRow: { display: "flex", justifyContent: "space-between", gap: 10, padding: "14px 0", borderBottom: "1px solid #22282d", fontSize: 12 },
-  statusRowLabel: { color: "#909891" },
-  statusRowValue: { color: "#d2d8d2" },
-  infoEmail: { color: "#8b938b", fontSize: 12, marginTop: 8, overflowWrap: "anywhere" },
-  securityNote: { background: "#171e19", border: "1px solid #304332", borderRadius: 10, padding: 14, color: "#8cd2a0", fontSize: 11, lineHeight: 1.6 },
-  usersHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 18 },
-  refreshButton: { background: "#292319", color: "#d7b563", border: "1px solid #5b4821", borderRadius: 8, padding: "9px 12px", cursor: "pointer" },
-  search: { width: "100%", boxSizing: "border-box", background: "#0b0e12", color: "#fff", border: "1px solid #30353b", borderRadius: 8, padding: 12, marginBottom: 18, outline: "none" },
-  tableWrap: { width: "100%", overflowX: "auto" },
-  table: { width: "100%", borderCollapse: "collapse", minWidth: 650 },
-  th: { textAlign: "left", padding: 12, fontSize: 10, color: "#d3b35f", letterSpacing: 1, borderBottom: "1px solid #30353b" },
-  td: { padding: 12, fontSize: 12, color: "#d0d5d0", borderBottom: "1px solid #22282d" },
-  tdUserId: { padding: 12, fontSize: 10, color: "#7f8981", borderBottom: "1px solid #22282d", wordBreak: "break-all" },
-  empty: { textAlign: "center", padding: 30, color: "#8b938b", fontSize: 12 },
-  footer: { borderTop: "1px solid #23282d", marginTop: 35, paddingTop: 20, color: "#59615b", fontSize: 10, letterSpacing: 1, display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" },
+
+  activeMenu: {
+    background: "#242117",
+    color: "#e5c46f",
+    border: "1px solid #5b4821",
+  },
+
+  menuIcon: {
+    width: 21,
+    textAlign: "center",
+    fontSize: 16,
+  },
+
+  sidebarBottom: {
+    marginTop: "auto",
+    paddingTop: 20,
+  },
+
+  adminBadge: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    padding: "12px 8px",
+    borderTop: "1px solid #252a25",
+  },
+
+  adminAvatar: {
+    width: 35,
+    height: 35,
+    borderRadius: "50%",
+    background: "#b99446",
+    color: "#111",
+    display: "grid",
+    placeItems: "center",
+    fontWeight: 800,
+  },
+
+  adminText: {
+    fontSize: 12,
+    fontWeight: 700,
+  },
+
+  adminEmail: {
+    fontSize: 10,
+    color: "#858c84",
+    marginTop: 4,
+    overflowWrap: "anywhere",
+  },
+
+  logout: {
+    width: "100%",
+    padding: 12,
+    background: "#171a18",
+    color: "#d0d4d0",
+    border: "1px solid #2b302b",
+    borderRadius: 8,
+    marginTop: 8,
+    cursor: "pointer",
+  },
+
+  main: {
+    flex: 1,
+    padding: "38px 34px",
+    minWidth: 0,
+  },
+
+  header: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 20,
+    flexWrap: "wrap",
+    marginBottom: 36,
+  },
+
+  breadcrumb: {
+    fontSize: 10,
+    letterSpacing: 2,
+    color: "#c7a654",
+    marginBottom: 12,
+  },
+
+  heading: {
+    fontSize: 28,
+    margin: 0,
+    fontWeight: 800,
+  },
+
+  subtitle: {
+    color: "#858d85",
+    fontSize: 13,
+    marginTop: 10,
+  },
+
+  status: {
+    border: "1px solid #31523b",
+    background: "#14231a",
+    color: "#8bd3a2",
+    borderRadius: 30,
+    padding: "10px 14px",
+    fontSize: 10,
+    letterSpacing: 0.8,
+  },
+
+  statusDot: {
+    display: "inline-block",
+    width: 7,
+    height: 7,
+    borderRadius: "50%",
+    background: "#64c881",
+    marginRight: 8,
+  },
+
+  error: {
+    background: "#311b1b",
+    color: "#ffb5a9",
+    border: "1px solid #6b3333",
+    padding: 14,
+    borderRadius: 10,
+    marginBottom: 20,
+    fontSize: 12,
+    overflowWrap: "anywhere",
+  },
+
+  sectionTitle: {
+    color: "#929990",
+    fontSize: 11,
+    letterSpacing: 1.6,
+    marginBottom: 16,
+  },
+
+  cards: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))",
+    gap: 15,
+  },
+
+  card: {
+    background: "#11151a",
+    border: "1px solid #262b30",
+    borderRadius: 14,
+    padding: 20,
+  },
+
+  cardTop: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 8,
+  },
+
+  cardLabel: {
+    fontSize: 10,
+    color: "#89918b",
+    letterSpacing: 1,
+  },
+
+  cardIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 9,
+    display: "grid",
+    placeItems: "center",
+    fontSize: 18,
+  },
+
+  cardValue: {
+    fontSize: 30,
+    fontWeight: 800,
+    marginTop: 22,
+  },
+
+  cardFooter: {
+    color: "#7d857e",
+    fontSize: 10,
+    marginTop: 13,
+  },
+
+  contentGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit,minmax(260px,1fr))",
+    gap: 16,
+    marginTop: 26,
+  },
+
+  panel: {
+    background: "#11151a",
+    border: "1px solid #262b30",
+    borderRadius: 14,
+    padding: 22,
+  },
+
+  panelTitle: {
+    fontSize: 15,
+    margin: "0 0 18px",
+  },
+
+  statusRow: {
+    display: "flex",
+    justifyContent: "space-between",
+    gap: 10,
+    padding: "14px 0",
+    borderBottom: "1px solid #22282d",
+    fontSize: 12,
+  },
+
+  statusRowLabel: {
+    color: "#909891",
+  },
+
+  statusRowValue: {
+    color: "#d2d8d2",
+  },
+
+  infoEmail: {
+    color: "#8b938b",
+    fontSize: 12,
+    marginTop: 8,
+    overflowWrap: "anywhere",
+  },
+
+  securityNote: {
+    background: "#171e19",
+    border: "1px solid #304332",
+    borderRadius: 10,
+    padding: 14,
+    color: "#8cd2a0",
+    fontSize: 11,
+    lineHeight: 1.6,
+  },
+
+  usersHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 12,
+    flexWrap: "wrap",
+    marginBottom: 18,
+  },
+
+  refreshButton: {
+    background: "#292319",
+    color: "#d7b563",
+    border: "1px solid #5b4821",
+    borderRadius: 8,
+    padding: "9px 12px",
+    cursor: "pointer",
+  },
+
+  search: {
+    width: "100%",
+    boxSizing: "border-box",
+    background: "#0b0e12",
+    color: "#fff",
+    border: "1px solid #30353b",
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 18,
+    outline: "none",
+  },
+
+  tableWrap: {
+    width: "100%",
+    overflowX: "auto",
+  },
+
+  table: {
+    width: "100%",
+    borderCollapse: "collapse",
+    minWidth: 650,
+  },
+
+  th: {
+    textAlign: "left",
+    padding: 12,
+    fontSize: 10,
+    color: "#d3b35f",
+    letterSpacing: 1,
+    borderBottom: "1px solid #30353b",
+  },
+
+  td: {
+    padding: 12,
+    fontSize: 12,
+    color: "#d0d5d0",
+    borderBottom: "1px solid #22282d",
+  },
+
+  tdUserId: {
+    padding: 12,
+    fontSize: 10,
+    color: "#7f8981",
+    borderBottom: "1px solid #22282d",
+    wordBreak: "break-all",
+  },
+
+  empty: {
+    textAlign: "center",
+    padding: 30,
+    color: "#8b938b",
+    fontSize: 12,
+  },
+
+  footer: {
+    borderTop: "1px solid #23282d",
+    marginTop: 35,
+    paddingTop: 20,
+    color: "#59615b",
+    fontSize: 10,
+    letterSpacing: 1,
+    display: "flex",
+    justifyContent: "space-between",
+    gap: 10,
+    flexWrap: "wrap",
+  },
 };
