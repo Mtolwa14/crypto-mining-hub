@@ -1,801 +1,637 @@
 
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
 import { supabase } from "../../lib/supabase";
 
-const money = (value) =>
-  new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    minimumFractionDigits: 2,
-  }).format(Number(value || 0));
+const menu = [
+  { name: "Overview", icon: "▦" },
+  { name: "Users", icon: "♙" },
+  { name: "Deposits", icon: "↓" },
+  { name: "Withdrawals", icon: "↑" },
+  { name: "Mining Plans", icon: "⛏" },
+  { name: "Investments", icon: "◆" },
+  { name: "Settings", icon: "⚙" },
+];
 
-const dateFormat = (value) =>
-  value ? new Date(value).toLocaleString() : "—";
-
-const styles = {
-  page: {
-    minHeight: "100vh",
-    background: "#080b0a",
-    color: "#f5f5f5",
-    padding: "18px",
-    fontFamily: "Arial, sans-serif",
-  },
-  container: { maxWidth: "1500px", margin: "0 auto" },
-  header: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    flexWrap: "wrap",
-    gap: "14px",
-    marginBottom: "25px",
-  },
-  brand: { color: "#d6ad45", fontSize: "24px", fontWeight: "bold" },
-  button: {
-    background: "#d6ad45",
-    color: "#111",
-    border: "none",
-    padding: "11px 15px",
-    borderRadius: "8px",
-    fontWeight: "bold",
-    cursor: "pointer",
-  },
-  card: {
-    background: "#121816",
-    border: "1px solid #29352e",
-    borderRadius: "12px",
-    padding: "18px",
-    minWidth: 0,
-  },
-  label: { color: "#9ca89f", fontSize: "12px", marginBottom: "9px" },
-  value: {
-    color: "#d6ad45",
-    fontSize: "23px",
-    fontWeight: "bold",
-    overflowWrap: "anywhere",
-  },
-  heading: { color: "#d6ad45", fontSize: "19px", marginBottom: "14px" },
-  section: { marginTop: "28px" },
-  tableWrap: {
-    overflowX: "auto",
-    background: "#121816",
-    border: "1px solid #29352e",
-    borderRadius: "10px",
-  },
-  table: { width: "100%", borderCollapse: "collapse", minWidth: "750px" },
-  cell: {
-    padding: "12px",
-    borderBottom: "1px solid #29352e",
-    textAlign: "left",
-    fontSize: "13px",
-    verticalAlign: "middle",
-  },
-  input: {
-    background: "#121816",
-    color: "#fff",
-    border: "1px solid #39483f",
-    padding: "12px",
-    borderRadius: "8px",
-    width: "100%",
-    outline: "none",
-  },
-};
-
-function Status({ value }) {
-  const status = String(value || "unknown").toLowerCase();
-  let color = "#e8c45c";
-
-  if (
-    ["approved", "finished", "confirmed", "completed", "active", "posted", "paid"].includes(status)
-  ) color = "#40d98b";
-
-  if (
-    ["rejected", "failed", "expired", "cancelled", "suspended"].includes(status)
-  ) color = "#ff7777";
-
-  return <span style={{ color, fontWeight: "bold" }}>{status.toUpperCase()}</span>;
-}
-
-function DataTable({ columns, rows, emptyText = "No records found." }) {
-  return (
-    <div style={styles.tableWrap}>
-      <table style={styles.table}>
-        <thead>
-          <tr>
-            {columns.map((column) => (
-              <th key={column.label} style={{ ...styles.cell, color: "#d6ad45" }}>
-                {column.label}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.length === 0 ? (
-            <tr>
-              <td colSpan={columns.length} style={{ ...styles.cell, color: "#9ca89f" }}>
-                {emptyText}
-              </td>
-            </tr>
-          ) : (
-            rows.map((row, index) => (
-              <tr key={row.id || index}>
-                {columns.map((column) => (
-                  <td key={column.label} style={styles.cell}>
-                    {column.render ? column.render(row) : row[column.key] ?? "—"}
-                  </td>
-                ))}
-              </tr>
-            ))
-          )}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-export default function AdminPage() {
-  const router = useRouter();
-
-  const [data, setData] = useState(null);
+export default function AdminDashboard() {
   const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
+  const [authorized, setAuthorized] = useState(false);
+  const [adminEmail, setAdminEmail] = useState("");
+  const [stats, setStats] = useState({
+    users: 0,
+    transactions: 0,
+    investments: 0,
+    withdrawals: 0,
+  });
   const [error, setError] = useState("");
-  const [message, setMessage] = useState("");
-  const [search, setSearch] = useState("");
-  const [tab, setTab] = useState("overview");
-  const [busyUser, setBusyUser] = useState("");
-  const [busyWithdrawal, setBusyWithdrawal] = useState("");
-
-  const loadDashboard = useCallback(async () => {
-    setError("");
-
-    try {
-      const { data: sessionData, error: sessionError } =
-        await supabase.auth.getSession();
-
-      if (sessionError) throw sessionError;
-
-      const token = sessionData?.session?.access_token;
-      if (!token) {
-        router.replace("/");
-        return;
-      }
-
-      const response = await fetch("/api/admin/overview", {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          Accept: "application/json",
-        },
-        cache: "no-store",
-      });
-
-      const raw = await response.text();
-      let result;
-
-      try {
-        result = JSON.parse(raw);
-      } catch {
-        throw new Error(`Server haijarudisha JSON. HTTP ${response.status}.`);
-      }
-
-      if (!response.ok) {
-        throw new Error(result?.error || `HTTP ${response.status}`);
-      }
-
-      setData(result);
-    } catch (err) {
-      setError(err.message || "Imeshindikana kupakia dashboard.");
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, [router]);
 
   useEffect(() => {
-    loadDashboard();
-  }, [loadDashboard]);
+    checkAdmin();
+  }, []);
 
-  async function handleLogout() {
-    await supabase.auth.signOut();
-    router.replace("/");
-  }
-
-  async function changeUserStatus(user) {
-    const action = user.is_banned ? "unban_user" : "ban_user";
-
-    const confirmed = window.confirm(
-      user.is_banned
-        ? `Unaruhusu tena akaunti ya ${user.email}?`
-        : `Unataka kusimamisha akaunti ya ${user.email}?`
-    );
-
-    if (!confirmed) return;
-
-    setBusyUser(user.id);
+  async function checkAdmin() {
+    setLoading(true);
     setError("");
-    setMessage("");
 
     try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const token = sessionData?.session?.access_token;
+      const { data: authData, error: authError } =
+        await supabase.auth.getUser();
 
-      if (!token) {
-        router.replace("/");
+      if (authError || !authData?.user) {
+        window.location.replace("/");
         return;
       }
 
-      const response = await fetch("/api/admin/overview", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ action, userId: user.id }),
-      });
+      const user = authData.user;
 
-      const result = await response.json();
-      if (!response.ok) throw new Error(result?.error || "User action failed.");
+      const { data: adminRecord, error: adminError } = await supabase
+        .from("admin_users")
+        .select("user_id,email")
+        .eq("user_id", user.id)
+        .maybeSingle();
 
-      setMessage(result.message || "User updated.");
-      await loadDashboard();
-    } catch (err) {
-      setError(err.message || "Imeshindikana kubadilisha user.");
-    } finally {
-      setBusyUser("");
-    }
-  }
-
-  async function reviewWithdrawal(withdrawal, decision) {
-    const actionName = decision === "approve" ? "kuidhinisha" : "kukataa";
-
-    const confirmed = window.confirm(
-      `Una uhakika unataka ${actionName} withdrawal ya ${money(withdrawal.amount)}?`
-    );
-
-    if (!confirmed) return;
-
-    setBusyWithdrawal(withdrawal.id);
-    setError("");
-    setMessage("");
-
-    try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const token = sessionData?.session?.access_token;
-
-      if (!token) {
-        router.replace("/");
+      if (adminError || !adminRecord) {
+        window.location.replace("/");
         return;
       }
 
-      const response = await fetch("/api/admin/withdrawals", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          withdrawalId: withdrawal.id,
-          decision,
-        }),
-      });
+      setAuthorized(true);
+      setAdminEmail(adminRecord.email || user.email || "");
 
-      const raw = await response.text();
-      let result;
-
-      try {
-        result = JSON.parse(raw);
-      } catch {
-        throw new Error(`Server haijarudisha JSON. HTTP ${response.status}.`);
-      }
-
-      if (!response.ok) {
-        throw new Error(result?.error || "Withdrawal review failed.");
-      }
-
-      setMessage(result.message || "Withdrawal updated.");
-      await loadDashboard();
+      await loadStats();
     } catch (err) {
-      setError(err.message || "Imeshindikana kuhakiki withdrawal.");
+      setError(err?.message || "Failed to load admin dashboard.");
     } finally {
-      setBusyWithdrawal("");
+      setLoading(false);
     }
   }
 
-  const users = data?.users || [];
-  const deposits = data?.deposits || [];
-  const withdrawals = data?.withdrawals || [];
-  const wallets = data?.wallets || [];
-  const transactions = data?.transactions || [];
-  const planPurchases = data?.planPurchases || [];
-  const planRules = data?.planRules || [];
-  const profitPeriods = data?.profitPeriods || [];
-  const profitAllocations = data?.profitAllocations || [];
-  const stats = data?.stats || {};
+  async function loadStats() {
+    const [
+      usersResult,
+      transactionsResult,
+      investmentsResult,
+      withdrawalsResult,
+    ] = await Promise.all([
+      supabase.from("profiles").select("*", { count: "exact", head: true }),
+      supabase.from("transactions").select("*", { count: "exact", head: true }),
+      supabase.from("mining_plan_purchases").select("*", { count: "exact", head: true }),
+      supabase.from("mining_withdrawals").select("*", { count: "exact", head: true }),
+    ]);
 
-  const emailByUser = useMemo(() => {
-    const map = {};
-    users.forEach((user) => {
-      map[user.id] = user.email || user.id;
+    setStats({
+      users: usersResult.count || 0,
+      transactions: transactionsResult.count || 0,
+      investments: investmentsResult.count || 0,
+      withdrawals: withdrawalsResult.count || 0,
     });
-    return map;
-  }, [users]);
 
-  const q = search.toLowerCase().trim();
+    const errors = [
+      usersResult.error,
+      transactionsResult.error,
+      investmentsResult.error,
+      withdrawalsResult.error,
+    ].filter(Boolean);
 
-  const filterRows = (rows, fields) => {
-    if (!q) return rows;
-    return rows.filter((row) =>
-      fields
-        .map((field) => String(row[field] ?? ""))
-        .join(" ")
-        .toLowerCase()
-        .includes(q)
-    );
-  };
+    if (errors.length) {
+      setError(errors.map((e) => e.message).join(" | "));
+    }
+  }
 
-  const filteredUsers = users.filter((user) =>
-    `${user.email} ${user.id} ${user.role}`.toLowerCase().includes(q)
-  );
+  async function logout() {
+    await supabase.auth.signOut();
+    window.location.replace("/");
+  }
 
-  const filteredWallets = wallets.filter((item) =>
-    `${emailByUser[item.user_id] || ""} ${item.user_id} ${item.currency} ${item.network}`
-      .toLowerCase().includes(q)
-  );
-
-  const filteredDeposits = deposits.filter((item) =>
-    `${emailByUser[item.user_id] || ""} ${item.user_id} ${item.status} ${item.currency} ${item.provider_payment_id || ""}`
-      .toLowerCase().includes(q)
-  );
-
-  const filteredWithdrawals = withdrawals.filter((item) =>
-    `${emailByUser[item.user_id] || ""} ${item.user_id} ${item.status} ${item.currency} ${item.wallet_address}`
-      .toLowerCase().includes(q)
-  );
-
-  const filteredTransactions = filterRows(transactions, [
-    "user_id", "type", "status", "currency", "tx_hash", "provider_payment_id",
-  ]);
-
-  const filteredPurchases = filterRows(planPurchases, [
-    "user_id", "plan_name", "status", "currency", "provider_payment_id",
-  ]);
-
-  const filteredPlans = filterRows(planRules, ["plan_name", "enabled"]);
-
-  const filteredPeriods = filterRows(profitPeriods, [
-    "period_name", "source", "status",
-  ]);
-
-  const filteredAllocations = filterRows(profitAllocations, [
-    "user_id", "period_name", "plan_name", "source",
-  ]);
-
-  const tabs = [
-    ["overview", "Overview"],
-    ["users", "Users"],
-    ["wallets", "Wallets"],
-    ["deposits", "Deposits"],
-    ["withdrawals", "Withdrawals"],
-    ["transactions", "Transactions"],
-    ["plans", "Investment Plans"],
-    ["purchases", "Plan Purchases"],
-    ["profits", "Profit Periods"],
-    ["allocations", "Profit Allocations"],
+  const cards = [
+    {
+      label: "TOTAL USERS",
+      value: stats.users,
+      icon: "♙",
+      color: "#e6bd65",
+    },
+    {
+      label: "TRANSACTIONS",
+      value: stats.transactions,
+      icon: "⇄",
+      color: "#64d6ae",
+    },
+    {
+      label: "MINING INVESTMENTS",
+      value: stats.investments,
+      icon: "◆",
+      color: "#b79cff",
+    },
+    {
+      label: "WITHDRAWAL REQUESTS",
+      value: stats.withdrawals,
+      icon: "↑",
+      color: "#ff9b72",
+    },
   ];
 
   if (loading) {
     return (
-      <main style={styles.page}>
-        <div style={styles.container}>
-          <h2 style={styles.brand}>CRYPTO MINING HUB</h2>
-          <p>Inafungua Admin Dashboard...</p>
-        </div>
-      </main>
+      <div style={styles.loading}>
+        <div style={styles.loadingLogo}>₿</div>
+        <p>VERIFYING ADMIN ACCESS...</p>
+      </div>
     );
   }
 
+  if (!authorized) return null;
+
   return (
-    <main style={styles.page}>
-      <div style={styles.container}>
-        <header style={styles.header}>
+    <div style={styles.page}>
+      <aside style={styles.sidebar}>
+        <div style={styles.brand}>
+          <div style={styles.logo}>₿</div>
           <div>
-            <div style={styles.brand}>CRYPTO MINING HUB</div>
-            <div style={{ color: "#9ca89f", marginTop: "6px" }}>
-              Secure Administrator Dashboard
+            <div style={styles.brandName}>CRYPTO MINING</div>
+            <div style={styles.brandSub}>HUB ADMIN</div>
+          </div>
+        </div>
+
+        <div style={styles.menuLabel}>ADMIN PANEL</div>
+
+        {menu.map((item, index) => (
+          <div
+            key={item.name}
+            style={{
+              ...styles.menuItem,
+              ...(index === 0 ? styles.activeMenu : {}),
+            }}
+          >
+            <span style={styles.menuIcon}>{item.icon}</span>
+            {item.name}
+          </div>
+        ))}
+
+        <div style={styles.sidebarBottom}>
+          <div style={styles.adminBadge}>
+            <div style={styles.adminAvatar}>A</div>
+            <div style={{ overflow: "hidden" }}>
+              <div style={styles.adminText}>Administrator</div>
+              <div style={styles.adminEmail}>{adminEmail}</div>
             </div>
           </div>
 
-          <div style={{ display: "flex", gap: "9px", flexWrap: "wrap" }}>
-            <button
-              style={styles.button}
-              disabled={refreshing}
-              onClick={async () => {
-                setRefreshing(true);
-                await loadDashboard();
-              }}
-            >
-              {refreshing ? "Loading..." : "Refresh"}
-            </button>
-            <button
-              style={{ ...styles.button, background: "#26332b", color: "#fff" }}
-              onClick={() => router.push("/")}
-            >
-              User Dashboard
-            </button>
-            <button
-              style={{ ...styles.button, background: "#8b2929", color: "#fff" }}
-              onClick={handleLogout}
-            >
-              Logout
-            </button>
+          <button onClick={logout} style={styles.logout}>
+            ↪ Logout
+          </button>
+        </div>
+      </aside>
+
+      <main style={styles.main}>
+        <header style={styles.header}>
+          <div>
+            <div style={styles.breadcrumb}>ADMIN / OVERVIEW</div>
+            <h1 style={styles.heading}>Admin Dashboard</h1>
+            <p style={styles.subtitle}>
+              Manage and monitor your Crypto Mining Hub platform.
+            </p>
+          </div>
+
+          <div style={styles.status}>
+            <span style={styles.statusDot}></span>
+            ADMIN ACCESS VERIFIED
           </div>
         </header>
 
         {error && (
-          <div style={{ ...styles.card, borderColor: "#a63d3d", marginBottom: "18px" }}>
-            <strong style={{ color: "#ff9999" }}>Error</strong>
-            <p style={{ overflowWrap: "anywhere" }}>{error}</p>
-            <button style={styles.button} onClick={loadDashboard}>Try Again</button>
-          </div>
-        )}
-
-        {message && (
-          <div style={{ ...styles.card, borderColor: "#28794c", color: "#40d98b", marginBottom: "18px" }}>
-            {message}
-          </div>
-        )}
-
-        <nav style={{
-          display: "flex",
-          gap: "8px",
-          overflowX: "auto",
-          paddingBottom: "12px",
-          marginBottom: "22px",
-        }}>
-          {tabs.map(([key, label]) => (
-            <button
-              key={key}
-              onClick={() => {
-                setTab(key);
-                setSearch("");
-              }}
-              style={{
-                ...styles.button,
-                whiteSpace: "nowrap",
-                background: tab === key ? "#d6ad45" : "#1c2821",
-                color: tab === key ? "#111" : "#ddd",
-              }}
-            >
-              {label}
+          <div style={styles.error}>
+            ⚠ {error}
+            <button onClick={loadStats} style={styles.retry}>
+              Retry
             </button>
-          ))}
-        </nav>
-
-        {tab !== "overview" && (
-          <div style={{ marginBottom: "20px" }}>
-            <input
-              style={styles.input}
-              placeholder="Search records..."
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-            />
           </div>
         )}
 
-        {tab === "overview" && (
-          <>
-            <h2 style={styles.heading}>Platform Overview</h2>
-            <div style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(175px, 1fr))",
-              gap: "14px",
-            }}>
-              {[
-                ["TOTAL USERS", stats.totalUsers],
-                ["APPROVED DEPOSITS", money(stats.totalDeposits)],
-                ["PENDING DEPOSITS", stats.pendingDeposits],
-                ["WITHDRAWAL REQUESTS", stats.totalWithdrawals],
-                ["PENDING WITHDRAWALS", stats.pendingWithdrawals],
-                ["TOTAL WALLET BALANCE", money(stats.totalWalletBalance)],
-                ["ACTIVE PLAN PURCHASES", stats.activePlanPurchases],
-                ["TOTAL PLAN SALES", money(stats.totalPlanSales)],
-                ["ACTIVE PLANS", stats.enabledPlans],
-                ["REALIZED PROFIT", money(stats.totalRealizedProfit)],
-                ["ALLOCATED PROFIT", money(stats.totalAllocatedProfit)],
-                ["PROFIT PERIODS", stats.totalProfitPeriods],
-              ].map(([label, value]) => (
-                <div style={styles.card} key={label}>
-                  <div style={styles.label}>{label}</div>
-                  <div style={styles.value}>{value ?? 0}</div>
+        <div style={styles.sectionTitle}>PLATFORM OVERVIEW</div>
+
+        <div style={styles.cards}>
+          {cards.map((card) => (
+            <div key={card.label} style={styles.card}>
+              <div style={styles.cardTop}>
+                <div style={styles.cardLabel}>{card.label}</div>
+                <div
+                  style={{
+                    ...styles.cardIcon,
+                    color: card.color,
+                    background: `${card.color}15`,
+                  }}
+                >
+                  {card.icon}
                 </div>
-              ))}
+              </div>
+
+              <div style={styles.cardValue}>{card.value.toLocaleString()}</div>
+              <div style={styles.cardFooter}>
+                <span style={{ color: card.color }}>●</span> Database count
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div style={styles.contentGrid}>
+          <div style={styles.panel}>
+            <div style={styles.panelHeader}>
+              <h2>Platform Status</h2>
+              <span style={styles.live}>● LIVE</span>
             </div>
 
-            <section style={styles.section}>
-              <h2 style={styles.heading}>Recent Deposits</h2>
-              <DataTable
-                rows={deposits.slice(0, 5)}
-                columns={[
-                  { label: "User", render: (row) => emailByUser[row.user_id] || row.user_id },
-                  { label: "Amount", render: (row) => money(row.actually_paid || row.price_amount || row.amount) },
-                  { label: "Currency", key: "currency" },
-                  { label: "Status", render: (row) => <Status value={row.status} /> },
-                  { label: "Date", render: (row) => dateFormat(row.created_at) },
-                ]}
-                emptyText="Hakuna deposit records."
-              />
-            </section>
+            {[
+              ["Authentication", "Connected"],
+              ["Admin Security", "Verified"],
+              ["Database", "Connected"],
+              ["Platform", "Crypto Mining Hub"],
+            ].map(([label, value]) => (
+              <div key={label} style={styles.statusRow}>
+                <span style={styles.statusRowLabel}>{label}</span>
+                <span style={styles.statusRowValue}>
+                  <span style={styles.greenDot}></span>
+                  {value}
+                </span>
+              </div>
+            ))}
+          </div>
 
-            <section style={styles.section}>
-              <h2 style={styles.heading}>Recent Withdrawals</h2>
-              <DataTable
-                rows={withdrawals.slice(0, 5)}
-                columns={[
-                  { label: "User", render: (row) => emailByUser[row.user_id] || row.user_id },
-                  { label: "Amount", render: (row) => money(row.amount) },
-                  { label: "Currency", key: "currency" },
-                  { label: "Status", render: (row) => <Status value={row.status} /> },
-                  { label: "Date", render: (row) => dateFormat(row.created_at) },
-                ]}
-                emptyText="Hakuna withdrawal requests."
-              />
-            </section>
-          </>
-        )}
+          <div style={styles.panel}>
+            <div style={styles.panelHeader}>
+              <h2>Admin Information</h2>
+            </div>
 
-        {tab === "users" && (
-          <section>
-            <h2 style={styles.heading}>User Management</h2>
-            <DataTable
-              rows={filteredUsers}
-              emptyText="Hakuna users waliopatikana."
-              columns={[
-                { label: "Email", key: "email" },
-                { label: "User ID", key: "id" },
-                { label: "Role", key: "role" },
-                {
-                  label: "Account",
-                  render: (row) => <Status value={row.is_banned ? "suspended" : "active"} />,
-                },
-                { label: "Registered", render: (row) => dateFormat(row.created_at) },
-                {
-                  label: "Action",
-                  render: (row) =>
-                    row.role === "admin" ? (
-                      <span style={{ color: "#d6ad45" }}>Protected Admin</span>
-                    ) : (
-                      <button
-                        style={{
-                          ...styles.button,
-                          padding: "8px 10px",
-                          background: row.is_banned ? "#28794c" : "#8b2929",
-                          color: "#fff",
-                        }}
-                        disabled={busyUser === row.id}
-                        onClick={() => changeUserStatus(row)}
-                      >
-                        {busyUser === row.id
-                          ? "Please wait..."
-                          : row.is_banned ? "Reactivate" : "Suspend"}
-                      </button>
-                    ),
-                },
-              ]}
-            />
-          </section>
-        )}
+            <div style={styles.adminInfo}>
+              <div style={styles.infoIcon}>♙</div>
+              <div>
+                <div style={styles.infoTitle}>Administrator Account</div>
+                <div style={styles.infoEmail}>{adminEmail}</div>
+              </div>
+            </div>
 
-        {tab === "wallets" && (
-          <section>
-            <h2 style={styles.heading}>Wallet Management</h2>
-            <DataTable
-              rows={filteredWallets}
-              columns={[
-                { label: "User", render: (row) => emailByUser[row.user_id] || row.user_id },
-                { label: "User ID", key: "user_id" },
-                { label: "Balance", render: (row) => money(row.balance) },
-                { label: "Currency", key: "currency" },
-                { label: "Network", key: "network" },
-              ]}
-              emptyText="Hakuna wallet records."
-            />
-          </section>
-        )}
+            <div style={styles.securityNote}>
+              <span>♢</span>
+              <div>
+                <strong>SECURITY ACTIVE</strong>
+                <p>
+                  This page checks the authenticated user against the admin_users
+                  table before displaying the dashboard.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
 
-        {tab === "deposits" && (
-          <section>
-            <h2 style={styles.heading}>Deposit Management</h2>
-            <DataTable
-              rows={filteredDeposits}
-              columns={[
-                { label: "User", render: (row) => emailByUser[row.user_id] || row.user_id },
-                { label: "Amount", render: (row) => money(row.actually_paid || row.price_amount || row.amount) },
-                { label: "Currency", key: "currency" },
-                { label: "Network", key: "network" },
-                { label: "Status", render: (row) => <Status value={row.status} /> },
-                { label: "Payment ID", key: "provider_payment_id" },
-                { label: "Date", render: (row) => dateFormat(row.created_at) },
-              ]}
-              emptyText="Hakuna deposit records."
-            />
-            <p style={{ color: "#9ca89f", fontSize: "12px", marginTop: "12px" }}>
-              Deposit crediting is controlled by verified NOWPayments notifications.
-            </p>
-          </section>
-        )}
-
-        {tab === "withdrawals" && (
-          <section>
-            <h2 style={styles.heading}>Withdrawal Management</h2>
-            <DataTable
-              rows={filteredWithdrawals}
-              columns={[
-                { label: "User", render: (row) => emailByUser[row.user_id] || row.user_id },
-                { label: "User ID", key: "user_id" },
-                { label: "Amount", render: (row) => money(row.amount) },
-                { label: "Currency", key: "currency" },
-                { label: "Network", key: "network" },
-                { label: "Wallet Address", key: "wallet_address" },
-                { label: "Status", render: (row) => <Status value={row.status} /> },
-                {
-                  label: "Admin Actions",
-                  render: (row) =>
-                    row.status === "Pending Review" ? (
-                      <div style={{ display: "flex", gap: "7px", flexWrap: "wrap" }}>
-                        <button
-                          style={{
-                            ...styles.button,
-                            background: "#28794c",
-                            color: "#fff",
-                            padding: "8px 10px",
-                          }}
-                          disabled={busyWithdrawal === row.id}
-                          onClick={() => reviewWithdrawal(row, "approve")}
-                        >
-                          {busyWithdrawal === row.id ? "Please wait..." : "Approve"}
-                        </button>
-                        <button
-                          style={{
-                            ...styles.button,
-                            background: "#8b2929",
-                            color: "#fff",
-                            padding: "8px 10px",
-                          }}
-                          disabled={busyWithdrawal === row.id}
-                          onClick={() => reviewWithdrawal(row, "reject")}
-                        >
-                          {busyWithdrawal === row.id ? "Please wait..." : "Reject"}
-                        </button>
-                      </div>
-                    ) : (
-                      <span style={{ color: "#9ca89f" }}>Reviewed</span>
-                    ),
-                },
-                { label: "Date", render: (row) => dateFormat(row.created_at) },
-              ]}
-              emptyText="Hakuna withdrawal requests."
-            />
-            <p style={{ color: "#9ca89f", fontSize: "12px", marginTop: "12px" }}>
-              Approve huweka ombi kwenye Awaiting Payout; haitumi USDT moja kwa moja. Reject hurudisha kiasi kwenye wallet ya mtumiaji.
-            </p>
-          </section>
-        )}
-
-        {tab === "transactions" && (
-          <section>
-            <h2 style={styles.heading}>All Transactions</h2>
-            <DataTable
-              rows={filteredTransactions}
-              columns={[
-                { label: "Type", key: "type" },
-                { label: "User", render: (row) => emailByUser[row.user_id] || row.user_id },
-                { label: "Amount", render: (row) => money(row.actually_paid || row.price_amount || row.amount) },
-                { label: "Currency", key: "currency" },
-                { label: "Network", key: "network" },
-                { label: "Status", render: (row) => <Status value={row.status} /> },
-                { label: "Transaction Hash", key: "tx_hash" },
-                { label: "Date", render: (row) => dateFormat(row.created_at) },
-              ]}
-              emptyText="Hakuna transactions."
-            />
-          </section>
-        )}
-
-        {tab === "plans" && (
-          <section>
-            <h2 style={styles.heading}>Investment Plan Rules</h2>
-            <DataTable
-              rows={filteredPlans}
-              columns={[
-                { label: "Plan", key: "plan_name" },
-                { label: "Price", render: (row) => money(row.price_usdt) },
-                { label: "Profit Weight", key: "profit_weight" },
-                { label: "Status", render: (row) => <Status value={row.enabled ? "active" : "disabled"} /> },
-                { label: "Updated", render: (row) => dateFormat(row.updated_at) },
-              ]}
-              emptyText="Hakuna investment plan rules."
-            />
-            <p style={{ color: "#9ca89f", fontSize: "12px", marginTop: "12px" }}>
-              Sehemu hii inaonyesha plan rules zilizopo kwenye database.
-            </p>
-          </section>
-        )}
-
-        {tab === "purchases" && (
-          <section>
-            <h2 style={styles.heading}>Mining Plan Purchases</h2>
-            <DataTable
-              rows={filteredPurchases}
-              columns={[
-                { label: "User", render: (row) => emailByUser[row.user_id] || row.user_id },
-                { label: "Plan", key: "plan_name" },
-                { label: "Price", render: (row) => money(row.price_usdt) },
-                { label: "Currency", key: "currency" },
-                { label: "Network", key: "network" },
-                { label: "Status", render: (row) => <Status value={row.status} /> },
-                { label: "Payment ID", key: "provider_payment_id" },
-                { label: "Purchase Date", render: (row) => dateFormat(row.created_at) },
-                { label: "Activated", render: (row) => dateFormat(row.activated_at) },
-              ]}
-              emptyText="Hakuna plan purchases."
-            />
-          </section>
-        )}
-
-        {tab === "profits" && (
-          <section>
-            <h2 style={styles.heading}>Investment Profit Periods</h2>
-            <DataTable
-              rows={filteredPeriods}
-              columns={[
-                { label: "Period", key: "period_name" },
-                { label: "Source", key: "source" },
-                { label: "Start", key: "start_date" },
-                { label: "End", key: "end_date" },
-                { label: "Realized Profit", render: (row) => money(row.realized_profit_usdt) },
-                { label: "Status", render: (row) => <Status value={row.status} /> },
-                { label: "Created", render: (row) => dateFormat(row.created_at) },
-                { label: "Posted", render: (row) => dateFormat(row.posted_at) },
-              ]}
-              emptyText="Hakuna profit periods."
-            />
-          </section>
-        )}
-
-        {tab === "allocations" && (
-          <section>
-            <h2 style={styles.heading}>Profit Allocations</h2>
-            <DataTable
-              rows={filteredAllocations}
-              columns={[
-                { label: "User", render: (row) => emailByUser[row.user_id] || row.user_id },
-                { label: "Period", key: "period_name" },
-                { label: "Plan", key: "plan_name" },
-                { label: "Source", key: "source" },
-                { label: "Principal", render: (row) => money(row.principal_usdt) },
-                { label: "Plan Weight", key: "plan_weight" },
-                { label: "Allocation Weight", key: "allocation_weight" },
-                { label: "Profit", render: (row) => money(row.profit_usdt) },
-                { label: "Created", render: (row) => dateFormat(row.created_at) },
-              ]}
-              emptyText="Hakuna profit allocations."
-            />
-          </section>
-        )}
-
-        <footer style={{
-          marginTop: "40px",
-          borderTop: "1px solid #29352e",
-          paddingTop: "18px",
-          color: "#718078",
-          fontSize: "12px",
-          textAlign: "center",
-        }}>
-          Crypto Mining Hub · Secure Admin Area
-        </footer>
-      </div>
-    </main>
+        <div style={styles.footer}>
+          CRYPTO MINING HUB ADMIN PANEL
+          <span>SECURE MANAGEMENT</span>
+        </div>
+      </main>
+    </div>
   );
 }
+
+const styles = {
+  page: {
+    minHeight: "100vh",
+    background: "#090b0f",
+    color: "#f4f4f4",
+    display: "flex",
+    fontFamily: "Arial, sans-serif",
+  },
+  loading: {
+    minHeight: "100vh",
+    background: "#090b0f",
+    color: "#e4bd68",
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 14,
+  },
+  loadingLogo: {
+    fontSize: 48,
+    fontWeight: 900,
+  },
+  sidebar: {
+    width: 245,
+    minHeight: "100vh",
+    background: "#0d1015",
+    borderRight: "1px solid #242820",
+    padding: "28px 18px",
+    display: "flex",
+    flexDirection: "column",
+    flexShrink: 0,
+  },
+  brand: {
+    display: "flex",
+    alignItems: "center",
+    gap: 12,
+    padding: "4px 8px 32px",
+  },
+  logo: {
+    width: 43,
+    height: 43,
+    borderRadius: 13,
+    background: "linear-gradient(135deg,#f0d38a,#a47b2b)",
+    color: "#111",
+    display: "grid",
+    placeItems: "center",
+    fontSize: 25,
+    fontWeight: 900,
+  },
+  brandName: {
+    fontSize: 12,
+    fontWeight: 900,
+    letterSpacing: 1.3,
+  },
+  brandSub: {
+    fontSize: 10,
+    color: "#d4ad55",
+    letterSpacing: 2,
+    marginTop: 5,
+  },
+  menuLabel: {
+    color: "#646b64",
+    fontSize: 10,
+    letterSpacing: 1.8,
+    margin: "10px 10px 12px",
+  },
+  menuItem: {
+    padding: "13px 12px",
+    borderRadius: 9,
+    color: "#929990",
+    display: "flex",
+    alignItems: "center",
+    gap: 12,
+    marginBottom: 5,
+    fontSize: 13,
+  },
+  activeMenu: {
+    background: "#242117",
+    color: "#e5c46f",
+    border: "1px solid #5b4821",
+  },
+  menuIcon: {
+    width: 21,
+    textAlign: "center",
+    fontSize: 16,
+  },
+  sidebarBottom: {
+    marginTop: "auto",
+    paddingTop: 20,
+  },
+  adminBadge: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    padding: "12px 8px",
+    borderTop: "1px solid #252a25",
+  },
+  adminAvatar: {
+    width: 35,
+    height: 35,
+    borderRadius: "50%",
+    background: "#b99446",
+    color: "#111",
+    display: "grid",
+    placeItems: "center",
+    fontWeight: 800,
+  },
+  adminText: {
+    fontSize: 12,
+    fontWeight: 700,
+  },
+  adminEmail: {
+    fontSize: 10,
+    color: "#858c84",
+    marginTop: 4,
+    overflowWrap: "anywhere",
+  },
+  logout: {
+    width: "100%",
+    padding: 12,
+    background: "#171a18",
+    color: "#d0d4d0",
+    border: "1px solid #2b302b",
+    borderRadius: 8,
+    marginTop: 8,
+    cursor: "pointer",
+  },
+  main: {
+    flex: 1,
+    padding: "38px 34px",
+    minWidth: 0,
+  },
+  header: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 20,
+    flexWrap: "wrap",
+    marginBottom: 36,
+  },
+  breadcrumb: {
+    fontSize: 10,
+    letterSpacing: 2,
+    color: "#c7a654",
+    marginBottom: 12,
+  },
+  heading: {
+    fontSize: 28,
+    margin: 0,
+    fontWeight: 800,
+  },
+  subtitle: {
+    color: "#858d85",
+    fontSize: 13,
+    marginTop: 10,
+  },
+  status: {
+    border: "1px solid #31523b",
+    background: "#14231a",
+    color: "#8bd3a2",
+    borderRadius: 30,
+    padding: "10px 14px",
+    fontSize: 10,
+    letterSpacing: 0.8,
+  },
+  statusDot: {
+    display: "inline-block",
+    width: 7,
+    height: 7,
+    borderRadius: "50%",
+    background: "#64c881",
+    marginRight: 8,
+  },
+  error: {
+    background: "#311b1b",
+    color: "#ffb5a9",
+    border: "1px solid #6b3333",
+    padding: 14,
+    borderRadius: 10,
+    marginBottom: 20,
+    fontSize: 12,
+    overflowWrap: "anywhere",
+  },
+  retry: {
+    marginLeft: 12,
+    padding: "6px 12px",
+    borderRadius: 6,
+    border: "1px solid #744444",
+    background: "#472626",
+    color: "#fff",
+    cursor: "pointer",
+  },
+  sectionTitle: {
+    color: "#929990",
+    fontSize: 11,
+    letterSpacing: 1.6,
+    marginBottom: 16,
+  },
+  cards: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))",
+    gap: 15,
+  },
+  card: {
+    background: "#11151a",
+    border: "1px solid #262b30",
+    borderRadius: 14,
+    padding: 20,
+  },
+  cardTop: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 8,
+  },
+  cardLabel: {
+    fontSize: 10,
+    color: "#89918b",
+    letterSpacing: 1,
+  },
+  cardIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 9,
+    display: "grid",
+    placeItems: "center",
+    fontSize: 18,
+  },
+  cardValue: {
+    fontSize: 30,
+    fontWeight: 800,
+    marginTop: 22,
+  },
+  cardFooter: {
+    color: "#7d857e",
+    fontSize: 10,
+    marginTop: 13,
+  },
+  contentGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit,minmax(260px,1fr))",
+    gap: 16,
+    marginTop: 26,
+  },
+  panel: {
+    background: "#11151a",
+    border: "1px solid #262b30",
+    borderRadius: 14,
+    padding: 22,
+  },
+  panelHeader: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 20,
+  },
+  panelHeader h2: {
+    fontSize: 15,
+    margin: 0,
+  },
+  live: {
+    fontSize: 10,
+    color: "#72c891",
+  },
+  statusRow: {
+    display: "flex",
+    justifyContent: "space-between",
+    gap: 10,
+    padding: "14px 0",
+    borderBottom: "1px solid #22282d",
+    fontSize: 12,
+  },
+  statusRowLabel: {
+    color: "#909891",
+  },
+  statusRowValue: {
+    color: "#d2d8d2",
+    display: "flex",
+    alignItems: "center",
+    gap: 7,
+  },
+  greenDot: {
+    width: 6,
+    height: 6,
+    borderRadius: "50%",
+    background: "#69c78a",
+  },
+  adminInfo: {
+    display: "flex",
+    alignItems: "center",
+    gap: 12,
+    padding: "12px 0 20px",
+  },
+  infoIcon: {
+    width: 42,
+    height: 42,
+    borderRadius: 12,
+    background: "#292319",
+    color: "#d7b563",
+    display: "grid",
+    placeItems: "center",
+    fontSize: 20,
+  },
+  infoTitle: {
+    fontSize: 12,
+    fontWeight: 700,
+  },
+  infoEmail: {
+    fontSize: 11,
+    color: "#8b938b",
+    marginTop: 5,
+    overflowWrap: "anywhere",
+  },
+  securityNote: {
+    display: "flex",
+    gap: 12,
+    background: "#171e19",
+    border: "1px solid #304332",
+    borderRadius: 10,
+    padding: 14,
+    color: "#8cd2a0",
+    fontSize: 12,
+  },
+  securityNote p: {
+    color: "#9ba79d",
+    lineHeight: 1.6,
+    margin: "8px 0 0",
+    fontSize: 11,
+  },
+  footer: {
+    borderTop: "1px solid #23282d",
+    marginTop: 35,
+    paddingTop: 20,
+    color: "#59615b",
+    fontSize: 10,
+    letterSpacing: 1,
+    display: "flex",
+    justifyContent: "space-between",
+    gap: 10,
+    flexWrap: "wrap",
+  },
+};
+
